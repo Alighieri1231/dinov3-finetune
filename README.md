@@ -1,4 +1,5 @@
-**[2025-08-27] Added DINOv3 weights to compare with DINOv2 experiments** \
+**[2025-09-09] added further exploration of the DINOv3 patch embedding in this [post-training repository](https://github.com/RobvanGastel/removing-pos-vit-bias).** \
+**[2025-08-27] Added DINOv3 weights to compare with DINOv2 experiments.** \
 **[2025-08-25] Added the ability to finetune DINOv3 encoders!**
 
 # Finetuning DINOv2, DINOv3 with LoRA for Image Segmentation
