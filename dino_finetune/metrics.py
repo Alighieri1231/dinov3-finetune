@@ -43,4 +43,4 @@ def compute_iou_metric(
         if union > 0:
             ious.append((intersection + eps) / (union + eps))
 
-    return torch.mean(torch.stack(ious)).item()
+    return torch.mean(torch.stack(ious))
