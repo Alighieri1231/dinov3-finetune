@@ -77,7 +77,7 @@ There are some more unnamed parameters for training like the learning rate and b
 ## Results
 
 **Pascal VOC** \
-I achieve a validation mean IoU of approximately 76.4% using LoRA and a 1x1 convolution decoder with DINOv3 ViT-L weights. When applying ImageNet-C corruptions (Hendrycks & Dietterich, 2019) to test robustness on Pascal VOC, the validation mean IoU drops to 73.8% with corruption severity level 5 (the maximum). The performance of the corrupted evaluation does fluctuate, I estimate between 2-5% depending on the type of finetuning. This also holds for the ADE20k dataset. Just the decoder or LoRA with 1x1 convolutional decoder fluctuates less than the fpn decoder. The qualitative performance of DINOv2 with LoRA and a 1x1 decoder is illustrated in the figure below. Based on their qualitative and quantitative performance, these pre-trained weights handle image corruption effectively.
+I achieve a validation mean IoU of approximately 68.8% using LoRA and a 1x1 convolution decoder with DINOv3 ViT-L weights. When applying ImageNet-C corruptions (Hendrycks & Dietterich, 2019) to test robustness on Pascal VOC, the validation mean IoU drops to 62.7% with corruption severity level 5 (the maximum). The performance of the corrupted evaluation does fluctuate, I estimate between 2-5% depending on the type of finetuning. This also holds for the ADE20k dataset. Just the decoder or LoRA with 1x1 convolutional decoder fluctuates less than the fpn decoder. The qualitative performance of DINOv2 with LoRA and a 1x1 decoder is illustrated in the figure below. Based on their qualitative and quantitative performance, these pre-trained weights handle image corruption effectively.
 
 
 ![](/assets/examples/voc_corruption_performance.png?raw=true)
@@ -106,8 +106,8 @@ You can use the pre-trained weights using the `--lora_weights` flag or using the
       <td>ViT-L/14</td>
       <td align="right">300 M</td>
       <td align="center">✅</td>
-      <td align="right">67.1%</td>
-      <td align="right">63.6%</td>
+      <td align="right">49.2%</td>
+      <td align="right">40.0%</td>
       <td>output/dinov2/large_voc_no_lora.pt</td>
     </tr>
     <tr>
@@ -116,8 +116,8 @@ You can use the pre-trained weights using the `--lora_weights` flag or using the
       <td>ViT-L/16</td>
       <td align="right">300 M</td>
       <td align="center">✅</td>
-      <td align="right">76.4%</td>
-      <td align="right">73.8%</td>
+      <td align="right">68.8%</td>
+      <td align="right">62.7%</td>
       <td>output/dinov3/large_base_voc_lora.pt</td>
     </tr>
     <tr>
@@ -126,8 +126,8 @@ You can use the pre-trained weights using the `--lora_weights` flag or using the
       <td>ViT-L/14</td>
       <td align="right">300 M</td>
       <td align="center">✅</td>
-      <td align="right">75.1%</td>
-      <td align="right">71.5%</td>
+      <td align="right">67.7%</td>
+      <td align="right">57.3%</td>
       <td>output/dinov2/large_base_voc_lora.pt</td>
     </tr>
     <tr>
@@ -136,8 +136,8 @@ You can use the pre-trained weights using the `--lora_weights` flag or using the
       <td>ViT-L/14</td>
       <td align="right">300 M</td>
       <td align="center">✅</td>
-      <td align="right">69.6%</td>
-      <td align="right">67.1%</td>
+      <td align="right">54.9%</td>
+      <td align="right">46.7%</td>
       <td>output/dinov2/large_voc_fpn.pt</td>
     </tr>
   </tbody>
@@ -146,7 +146,7 @@ You can use the pre-trained weights using the `--lora_weights` flag or using the
 <br />
 
 **ADE20k** \
-I achieve a validation mean IoU of approximately 63.9% using LoRA and a 1x1 convolution decoder with DINOv3 ViT-L weights. With ADE20k-C (corruption severity level 5) the performance drops to 60.7%. An qualitative performance example of the DINOv2 LoRA + 1x1 decoder is illustrated in the figure below. 
+I achieve a validation mean IoU of approximately 40.0% using LoRA and a 1x1 convolution decoder with DINOv3 ViT-L weights. With ADE20k-C (corruption severity level 5) the performance drops to 33.3%. An qualitative performance example of the DINOv2 LoRA + 1x1 decoder is illustrated in the figure below. 
 
 
 ![](/assets/examples/ade20k_corruption_performance.png?raw=true)
@@ -172,8 +172,8 @@ I achieve a validation mean IoU of approximately 63.9% using LoRA and a 1x1 conv
       <td>ViT-L/14</td>
       <td align="right">300 M</td>
       <td align="center">✅</td>
-      <td align="right">57.2%</td>
-      <td align="right">54.4%</td>
+      <td align="right">31.3%</td>
+      <td align="right">26.8%</td>
       <td>output/dinov2/large_ade20k_no_lora.pt</td>
     </tr>
     <tr>
@@ -182,8 +182,8 @@ I achieve a validation mean IoU of approximately 63.9% using LoRA and a 1x1 conv
       <td>ViT-L/16</td>
       <td align="right">300M</td>
       <td align="center">✅</td>
-      <td align="right">63.9%</td>
-      <td align="right">60.7%</td>
+      <td align="right">40.0%</td>
+      <td align="right">33.3%</td>
       <td>output/dinov3/large_ade20k_lora.pt</td>
     </tr>
     <tr>
@@ -192,8 +192,8 @@ I achieve a validation mean IoU of approximately 63.9% using LoRA and a 1x1 conv
       <td>ViT-L/14</td>
       <td align="right">300 M</td>
       <td align="center">✅</td>
-      <td align="right">62.2%</td>
-      <td align="right">59.2%</td>
+      <td align="right">39.0%</td>
+      <td align="right">30.1%</td>
       <td>output/dinov2/large_ade20k_lora.pt</td>
     </tr>
     <tr>
@@ -202,8 +202,8 @@ I achieve a validation mean IoU of approximately 63.9% using LoRA and a 1x1 conv
       <td>ViT-L/14</td>
       <td align="right">300 M</td>
       <td align="center">✅</td>
-      <td align="right">62.0%</td>
-      <td align="right">58.1%</td>
+      <td align="right">36.9%</td>
+      <td align="right">28.9%</td>
       <td>output/dinov2/large_ade20k_fpn.pt</td>
     </tr>
   </tbody>
