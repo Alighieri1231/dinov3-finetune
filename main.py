@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR, SequentialLR
 
 from dino_finetune import (
     DINOEncoderLoRA,
@@ -62,8 +63,13 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
 
     # Finetuning for segmentation
     criterion = nn.CrossEntropyLoss(ignore_index=255).cuda()
-    optimizer = optim.AdamW(dino_lora.parameters(), lr=config.lr)
+    optimizer = optim.AdamW(dino_lora.parameters(), lr=config.lr, weight_decay=config.weight_decay)
 
+    # Scheduler start warm-up with steady incline, at config.warmup_epochs, start cosine annealing    
+    warmup_sched  = LambdaLR(optimizer, lambda epoch: min(1.0, (epoch + 1) / config.warmup_epochs))
+    cos_sched = CosineAnnealingLR(optimizer, T_max=config.max_epochs - config.warmup_epochs, eta_min=config.min_lr)
+    scheduler = SequentialLR(optimizer, schedulers=[warmup_sched, cos_sched], milestones=[config.warm_up_epochs])
+    
     # Log training and validation metrics
     metrics = {
         "train_loss": [],
@@ -84,6 +90,8 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
 
             loss.backward()
             optimizer.step()
+    
+        scheduler.step()
 
         if epoch % 5 == 0:
             y_hat = torch.sigmoid(logits)
@@ -173,14 +181,32 @@ if __name__ == "__main__":
     parser.add_argument(
         "--epochs",
         type=int,
-        default=20,
+        default=100,
         help="Number of training epochs",
+    )
+    parser.add_argument(
+        "--warmup_epochs",
+        type=int,
+        default=20,
+        help="Number of epochs of the training epochs for which we do a warm-up.",
     )
     parser.add_argument(
         "--lr",
         type=float,
-        default=3e-4,
+        default=3e-3,
         help="Learning rate",
+    )
+    parser.add_argument(
+        "--min_lr",
+        type=float,
+        default=3e-5,
+        help="lowest learning rate for the scheduler"
+    )
+    parser.add_argument(
+        "--weight_decay",
+        type=float,
+        default=1e-2,
+        help="The weight decay parameter",
     )
     parser.add_argument(
         "--batch_size",
