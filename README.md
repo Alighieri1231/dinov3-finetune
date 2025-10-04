@@ -77,7 +77,7 @@ There are some more unnamed parameters for training like the learning rate and b
 ## Results
 
 **Pascal VOC** \
-I achieve a validation mean IoU of approximately 68.8% using LoRA and a 1x1 convolution decoder with DINOv3 ViT-L weights. When applying ImageNet-C corruptions (Hendrycks & Dietterich, 2019) to test robustness on Pascal VOC, the validation mean IoU drops to 62.7% with corruption severity level 5 (the maximum). The performance of the corrupted evaluation does fluctuate, I estimate between 2-5% depending on the type of finetuning. This also holds for the ADE20k dataset. Just the decoder or LoRA with 1x1 convolutional decoder fluctuates less than the fpn decoder. The qualitative performance of DINOv2 with LoRA and a 1x1 decoder is illustrated in the figure below. Based on their qualitative and quantitative performance, these pre-trained weights handle image corruption effectively.
+I achieve a validation mean IoU of approximately 71.8% using LoRA and a 1x1 convolution decoder with DINOv3 ViT-L weights. When applying ImageNet-C corruptions (Hendrycks & Dietterich, 2019) to test robustness on Pascal VOC, the validation mean IoU drops to 65.7% with corruption severity level 5 (the maximum). The performance of the corrupted evaluation does fluctuate, I estimate between 2-5% depending on the type of finetuning. This also holds for the ADE20k dataset. Just the decoder or LoRA with 1x1 convolutional decoder fluctuates less than the fpn decoder. The qualitative performance of DINOv2 with LoRA and a 1x1 decoder is illustrated in the figure below. Based on their qualitative and quantitative performance, these pre-trained weights handle image corruption effectively.
 
 
 ![](/assets/examples/voc_corruption_performance.png?raw=true)
@@ -85,6 +85,7 @@ I achieve a validation mean IoU of approximately 68.8% using LoRA and a 1x1 conv
 
 You can use the pre-trained weights using the `--lora_weights` flag or using the `load_parameters` function call. Registers here mean that extra context global context tokens are learned, see the second reference. All models are finetuned for 100 epochs.
 
+I also ran experiments with DINOv3 on sizes ViT-B, and ViT-H, for which I obtained 71.5% and 73.3% mIoU for finetuning with LoRA and a linear head. The base model while performing similar is less robust to the corruptions.
 
 <table style="margin: auto">
   <thead>
@@ -116,8 +117,8 @@ You can use the pre-trained weights using the `--lora_weights` flag or using the
       <td>ViT-L/16</td>
       <td align="right">300 M</td>
       <td align="center">✅</td>
-      <td align="right">68.8%</td>
-      <td align="right">62.7%</td>
+      <td align="right">71.8%</td>
+      <td align="right">65.4%</td>
       <td>output/dinov3/large_base_voc_lora.pt</td>
     </tr>
     <tr>

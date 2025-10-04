@@ -67,8 +67,8 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
 
     # Scheduler start warm-up with steady incline, at config.warmup_epochs, start cosine annealing    
     warmup_sched  = LambdaLR(optimizer, lambda epoch: min(1.0, (epoch + 1) / config.warmup_epochs))
-    cos_sched = CosineAnnealingLR(optimizer, T_max=config.max_epochs - config.warmup_epochs, eta_min=config.min_lr)
-    scheduler = SequentialLR(optimizer, schedulers=[warmup_sched, cos_sched], milestones=[config.warm_up_epochs])
+    cos_sched = CosineAnnealingLR(optimizer, T_max=config.epochs - config.warmup_epochs, eta_min=config.min_lr)
+    scheduler = SequentialLR(optimizer, schedulers=[warmup_sched, cos_sched], milestones=[config.warmup_epochs])
     
     # Log training and validation metrics
     metrics = {
@@ -96,7 +96,7 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
         if epoch % 5 == 0:
             y_hat = torch.sigmoid(logits)
             validate_epoch(dino_lora, val_loader, criterion, metrics)
-            dino_lora.save_parameters(f"output/{config.exp_name}.pt")
+            dino_lora.save_parameters(f"output/{config.exp_name}_e{epoch}.pt")
 
             if config.debug:
                 # Visualize some of the batch and write to files when debugging
@@ -211,7 +211,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=12,
+        default=64,
         help="Finetuning batch size",
     )
     config = parser.parse_args()
@@ -227,6 +227,7 @@ if __name__ == "__main__":
         "base": f"{config.dino_type}_vitb{config.patch_size}{'_reg' if config.dino_type == 'dinov2' else ''}",
         "large": f"{config.dino_type}_vitl{config.patch_size}{'_reg' if config.dino_type == 'dinov2' else ''}",
         "giant": f"{config.dino_type}_vitg{config.patch_size}{'_reg' if config.dino_type == 'dinov2' else ''}",
+        "huge": f"{config.dino_type}_vith{config.patch_size}{'plus' if config.dino_type == 'dinov3' else ''}{'_reg' if config.dino_type == 'dinov2' else ''}",
     }
 
     encoder = torch.hub.load(
