@@ -104,6 +104,7 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
         root=config.root,
         split_json=config.split_json,
         fold=config.fold,
+        n_workers=config.n_workers,
     )
     # Finetuning for segmentation
     criterion = nn.CrossEntropyLoss(ignore_index=255).cuda()
@@ -211,7 +212,6 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
                     filename=f"output/viz_{config.exp_name}_{epoch}",
                 )
             dino_lora.save_parameters(f"output/{config.exp_name}_e{epoch}.pt")
-
 
     # Log metrics & save model the final values
     # Saves only loRA parameters and classifer
@@ -324,6 +324,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--root", type=str, default="/home/exx/Documents/nnUNetFrame/dataset/nnUNet_raw"
     )
+    parser.add_argument("--n_workers", type=int, default=32)
     parser.add_argument("--split_json", type=str, default="./data/splits_final.json")
     parser.add_argument("--fold", type=int, default=0)
 
