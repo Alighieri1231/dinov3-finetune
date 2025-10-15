@@ -200,15 +200,15 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
                         "val/dice_fg": float(metrics["val_dice_fg"][-1]),
                         "epoch": epoch,  # <- publica epoch
                     },
-                    step=epoch,  # <- step = epoch
+                    step=global_step,  # <- step = epoch
                 )
 
                 # Por-clase
                 _log_val_dict(
-                    "val/iou_per_class", metrics["val_iou_per_class"][-1], epoch
+                    "val/iou_per_class", metrics["val_iou_per_class"][-1], global_step
                 )
                 _log_val_dict(
-                    "val/dice_per_class", metrics["val_dice_per_class"][-1], epoch
+                    "val/dice_per_class", metrics["val_dice_per_class"][-1], global_step
                 )
 
         if epoch % 25 == 0:
