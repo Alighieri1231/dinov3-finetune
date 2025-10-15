@@ -5,7 +5,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=18
 #SBATCH --gpus=1
-#SBATCH --mem=06G
+#SBATCH --mem=96G
 #SBATCH --hint=nomultithread
 #SBATCH --output=logs/%x-%j.out
 
