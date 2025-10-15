@@ -1,7 +1,7 @@
 import json
 import logging
 import argparse
-
+import wandb
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -19,6 +19,11 @@ from dino_finetune.metrics import (
     foreground_mean_dice_iou,
     per_class_dice_iou,
 )
+
+
+def _log_val_dict(prefix: str, d: dict, step: int):
+    flat = {f"{prefix}/{k}": float(v) for k, v in d.items()}
+    wandb.log(flat, step=step)  # aquí step será 'epoch'
 
 
 def validate_epoch(
@@ -137,44 +142,14 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
         "val_dice": [],
     }
     logging.info("Starting training...")
-    # for epoch in range(config.epochs):
-    #     dino_lora.train()
 
-    #     for images, masks in train_loader:
-    #         images = images.float().cuda()
-    #         masks = masks.long().cuda()
-    #         optimizer.zero_grad()
-
-    #         logits = dino_lora(images)
-    #         loss = criterion(logits, masks)
-
-    #         loss.backward()
-    #         optimizer.step()
-
-    #     scheduler.step()
-
-    #     if epoch % 5 == 0:
-    #         y_hat = torch.sigmoid(logits)
-    #         validate_epoch(dino_lora, val_loader, criterion, metrics)
-    #         dino_lora.save_parameters(f"output/{config.exp_name}_e{epoch}.pt")
-
-    #         if config.debug:
-    #             # Visualize some of the batch and write to files when debugging
-    #             visualize_overlay(
-    #                 images, y_hat, config.n_classes, filename=f"viz_{epoch}"
-    #             )
-
-    #         logging.info(
-    #             f"Epoch: {epoch} - val IoU: {metrics['val_iou'][-1]} "
-    #             f"- val loss {metrics['val_loss'][-1]}"
-    #         )
     for epoch in range(config.epochs):
         dino_lora.train()
         running = 0.0
         pbar = tqdm.tqdm(
             train_loader, desc=f"Epoch {epoch + 1}/{config.epochs}", unit="batch"
         )
-        for images, masks in pbar:
+        for b_idx, (images, masks) in enumerate(pbar):
             images = images.float().cuda()
             masks = masks.long().cuda()
             optimizer.zero_grad()
@@ -187,6 +162,18 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
             running = 0.9 * running + 0.1 * loss.item() if running else loss.item()
             lr = optimizer.param_groups[0]["lr"]
             pbar.set_postfix(loss=f"{running:.4f}", lr=f"{lr:.2e}")
+            if config.wandb and (b_idx % config.log_interval == 0):
+                global_step = epoch * len(train_loader) + b_idx
+                wandb.log(
+                    {
+                        "train/loss": float(loss.item()),
+                        "train/loss_ewm": float(running),
+                        "train/lr": float(lr),
+                        "train/epoch": epoch,
+                        "global_step": global_step,  # <- clave: publica el contador
+                    },
+                    step=global_step,
+                )
 
         scheduler.step()
 
@@ -203,6 +190,27 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
                 f"- val IoU per class: {metrics['val_iou_per_class'][-1]}"
                 f"- val Dice per class: {metrics['val_dice_per_class'][-1]}"
             )
+            if config.wandb:
+                wandb.log(
+                    {
+                        "val/loss": float(metrics["val_loss"][-1]),
+                        "val/iou": float(metrics["val_iou"][-1]),
+                        "val/dice": float(metrics["val_dice"][-1]),
+                        "val/iou_fg": float(metrics["val_iou_fg"][-1]),
+                        "val/dice_fg": float(metrics["val_dice_fg"][-1]),
+                        "epoch": epoch,  # <- publica epoch
+                    },
+                    step=epoch,  # <- step = epoch
+                )
+
+                # Por-clase
+                _log_val_dict(
+                    "val/iou_per_class", metrics["val_iou_per_class"][-1], epoch
+                )
+                _log_val_dict(
+                    "val/dice_per_class", metrics["val_dice_per_class"][-1], epoch
+                )
+
         if epoch % 25 == 0:
             if config.debug:
                 visualize_overlay(
@@ -218,6 +226,12 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
     dino_lora.save_parameters(f"output/{config.exp_name}.pt")
     with open(f"output/{config.exp_name}_metrics.json", "w") as f:
         json.dump(metrics, f)
+    if config.wandb:
+        # Sube el JSON de métricas también
+        wandb.save(f"output/{config.exp_name}_metrics.json")
+        final_art = wandb.Artifact(f"{config.exp_name}-final", type="model")
+        final_art.add_file(f"output/{config.exp_name}.pt")
+        wandb.log_artifact(final_art)
 
 
 if __name__ == "__main__":
@@ -328,6 +342,14 @@ if __name__ == "__main__":
     parser.add_argument("--split_json", type=str, default="./data/splits_final.json")
     parser.add_argument("--fold", type=int, default=0)
 
+    parser.add_argument(
+        "--wandb", action="store_true", help="Enable Weights & Biases logging"
+    )
+    parser.add_argument("--wandb_project", type=str, default="dinov3-finetune")
+    parser.add_argument(
+        "--log_interval", type=int, default=50, help="batches between wandb logs"
+    )
+
     config = parser.parse_args()
 
     # Dataset configuration -> for liver I have 0 background, 1 liver, 2 kidney
@@ -354,6 +376,21 @@ if __name__ == "__main__":
         source="local",
         weights="/scratch/bcastane_lab/eochoaal/dinov3/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
     ).cuda()
+
+    if config.wandb:
+        wandb.init(
+            project=config.wandb_project,
+            name=config.exp_name,
+            config=vars(config),
+        )
+
+        # 1) Nombra las métricas de paso
+        wandb.define_metric("global_step")  # contador de batches
+        wandb.define_metric("epoch")  # contador de épocas
+
+        # 2) Asocia cada grupo a su step correspondiente
+        wandb.define_metric("train/*", step_metric="global_step")
+        wandb.define_metric("val/*", step_metric="epoch")
 
     config.emb_dim = encoder.num_features
 
@@ -383,3 +420,5 @@ if __name__ == "__main__":
         )
         logging.info(f"The image size is lowered to ({config.img_dim}).")
     finetune_dino(config, encoder)
+    if config.wandb:
+        wandb.finish()
