@@ -53,14 +53,14 @@ for FOLD in "${FOLDS[@]}"; do
   run_job "${EXP}" --dataset "${DATASET}" --root "${ROOT}" --split_json "${SPLIT}" \
     --size "${SIZE}" --dino_type "${DINO}" --batch_size "${BATCH}" \
     --epochs "${EPOCHS}" --warmup_epochs "${WARMUP}" --fold "${FOLD}" --debug \
-    --n_workers "${N_WORKERS}"
+    --n_workers "${N_WORKERS}" --wandb
 
   # 2) FPN
   EXP="dino_${DATASET}_fold${FOLD}_bs${BATCH}_FPN_${STAMP}"
   run_job "${EXP}" --dataset "${DATASET}" --root "${ROOT}" --split_json "${SPLIT}" \
     --size "${SIZE}" --dino_type "${DINO}" --batch_size "${BATCH}" \
     --epochs "${EPOCHS}" --warmup_epochs "${WARMUP}" --fold "${FOLD}" --use_fpn --debug \
-    --n_workers "${N_WORKERS}"
+    --n_workers "${N_WORKERS}" --wandb
 done
 
 for FOLD in "${FOLDS[@]}"; do
@@ -70,7 +70,7 @@ for FOLD in "${FOLDS[@]}"; do
     run_job "${EXP}" --dataset "${DATASET}" --root "${ROOT}" --split_json "${SPLIT}" \
       --size "${SIZE}" --dino_type "${DINO}" --batch_size "${BATCH}" \
       --epochs "${EPOCHS}" --warmup_epochs "${WARMUP}" --fold "${FOLD}" \
-      --use_lora --r "${r}" --n_workers "${N_WORKERS}" --debug
+      --use_lora --r "${r}" --n_workers "${N_WORKERS}" --debug --wandb
   done
 
   # 4) FPN + LoRA r=4,8
@@ -79,7 +79,7 @@ for FOLD in "${FOLDS[@]}"; do
     run_job "${EXP}" --dataset "${DATASET}" --root "${ROOT}" --split_json "${SPLIT}" \
       --size "${SIZE}" --dino_type "${DINO}" --batch_size "${BATCH}" \
       --epochs "${EPOCHS}" --warmup_epochs "${WARMUP}" --fold "${FOLD}" \
-      --use_fpn --use_lora --r "${r}" --n_workers "${N_WORKERS}" --debug
+      --use_fpn --use_lora --r "${r}" --n_workers "${N_WORKERS}" --debug --wandb
   done
 done
 
