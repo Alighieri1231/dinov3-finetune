@@ -192,7 +192,6 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
         if epoch % 5 == 0:
             y_hat = torch.sigmoid(logits)
             validate_epoch(dino_lora, val_loader, criterion, metrics)
-            dino_lora.save_parameters(f"output/{config.exp_name}_e{epoch}.pt")
 
             logging.info(
                 f"Epoch: {epoch} - val IoU: {metrics['val_iou'][-1]:.4f} "
@@ -211,6 +210,8 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
                     config.n_classes,
                     filename=f"output/viz_{config.exp_name}_{epoch}",
                 )
+            dino_lora.save_parameters(f"output/{config.exp_name}_e{epoch}.pt")
+
 
     # Log metrics & save model the final values
     # Saves only loRA parameters and classifer
