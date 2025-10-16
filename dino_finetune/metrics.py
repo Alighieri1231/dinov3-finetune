@@ -192,46 +192,39 @@ class DatasetSegMetrics:
 
     @torch.no_grad()
     def update(self, y_hat: torch.Tensor, y: torch.Tensor):
-        """
-        y_hat: (B, C, H, W[,(D)])
-        y    : (B, H, W[,(D)])
-        """
-        # Move to CPU for safe accumulation; keep boolean logic on device to be fast
-        device = y.device
-        B = y.shape[0]
-        pred = torch.argmax(y_hat, dim=1)  # (B, ...)
+        pred = torch.argmax(y_hat, dim=1)
 
-        # Valid mask (ignore_index)
         if self.ignore_index is not None:
-            valid = y != self.ignore_index
+            valid = (y != self.ignore_index)
         else:
             valid = torch.ones_like(y, dtype=torch.bool)
 
+        B = y.shape[0]
         for c in range(self.C):
-            # per-sample loop to do macro (case-wise) accumulation with NaN policy
             for b in range(B):
                 pred_c = (pred[b] == c) & valid[b]
-                true_c = (y[b] == c) & valid[b]
+                true_c = (y[b]   == c) & valid[b]
 
-                tp = (pred_c & true_c).sum()
-                fp = (pred_c & ~true_c).sum()
-                fn = (~pred_c & true_c).sum()
+                # get CPU float64 scalars
+                tp = (pred_c & true_c).sum().to(dtype=torch.float64).cpu()
+                fp = (pred_c & ~true_c).sum().to(dtype=torch.float64).cpu()
+                fn = (~pred_c & true_c).sum().to(dtype=torch.float64).cpu()
 
-                denom_iou = tp + fp + fn
-                denom_dice = 2 * tp + fp + fn
+                denom_iou  = tp + fp + fn
+                denom_dice = (2 * tp) + fp + fn
 
-                # Macro: add if denom > 0 (else NaN → skip; same spirit as nnU-Net)
-                if denom_iou > 0:
-                    self._iou_sum[c] += tp.double() / denom_iou.double()
+                if denom_iou.item() > 0:
+                    self._iou_sum[c]   += tp / denom_iou
                     self._iou_count[c] += 1
-                if denom_dice > 0:
-                    self._dice_sum[c] += (2 * tp).double() / denom_dice.double()
+                if denom_dice.item() > 0:
+                    self._dice_sum[c]   += (2 * tp) / denom_dice
                     self._dice_count[c] += 1
 
-                # Micro: always add raw counts (across dataset)
-                self._tp[c] += tp.double()
-                self._fp[c] += fp.double()
-                self._fn[c] += fn.double()
+                # micro (also CPU)
+                self._tp[c] += tp
+                self._fp[c] += fp
+                self._fn[c] += fn
+
 
     def compute(self) -> Dict[str, Dict]:
         """Returns dict with per_class, foreground_mean (macro), and micro (optional)."""
