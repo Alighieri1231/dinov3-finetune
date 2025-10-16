@@ -11,7 +11,9 @@ import torch
 from torch import nn, Tensor
 from torch.nn import functional as F
 
-from dinov3.eval.segmentation.models.utils.position_encoding import PositionEmbeddingSine
+from dino_finetune.model.segmentation.models.utils.position_encoding import (
+    PositionEmbeddingSine,
+)
 
 
 def c2_xavier_fill(module: nn.Module) -> None:
@@ -55,7 +57,15 @@ class Conv2d(torch.nn.Conv2d):
         self.activation = activation
 
     def forward(self, x):
-        x = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+        x = F.conv2d(
+            x,
+            self.weight,
+            self.bias,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.groups,
+        )
         if self.norm is not None:
             x = self.norm(x)
         if self.activation is not None:
@@ -64,7 +74,9 @@ class Conv2d(torch.nn.Conv2d):
 
 
 class SelfAttentionLayer(nn.Module):
-    def __init__(self, d_model, nhead, dropout=0.0, activation="relu", normalize_before=False):
+    def __init__(
+        self, d_model, nhead, dropout=0.0, activation="relu", normalize_before=False
+    ):
         super().__init__()
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
 
@@ -92,7 +104,9 @@ class SelfAttentionLayer(nn.Module):
         query_pos: Optional[Tensor] = None,
     ):
         q = k = self.with_pos_embed(tgt, query_pos)
-        tgt2 = self.self_attn(q, k, value=tgt, attn_mask=tgt_mask, key_padding_mask=tgt_key_padding_mask)[0]
+        tgt2 = self.self_attn(
+            q, k, value=tgt, attn_mask=tgt_mask, key_padding_mask=tgt_key_padding_mask
+        )[0]
         tgt = tgt + self.dropout(tgt2)
         tgt = self.norm(tgt)
 
@@ -107,7 +121,9 @@ class SelfAttentionLayer(nn.Module):
     ):
         tgt2 = self.norm(tgt)
         q = k = self.with_pos_embed(tgt2, query_pos)
-        tgt2 = self.self_attn(q, k, value=tgt2, attn_mask=tgt_mask, key_padding_mask=tgt_key_padding_mask)[0]
+        tgt2 = self.self_attn(
+            q, k, value=tgt2, attn_mask=tgt_mask, key_padding_mask=tgt_key_padding_mask
+        )[0]
         tgt = tgt + self.dropout(tgt2)
 
         return tgt
@@ -125,7 +141,9 @@ class SelfAttentionLayer(nn.Module):
 
 
 class CrossAttentionLayer(nn.Module):
-    def __init__(self, d_model, nhead, dropout=0.0, activation="relu", normalize_before=False):
+    def __init__(
+        self, d_model, nhead, dropout=0.0, activation="relu", normalize_before=False
+    ):
         super().__init__()
         self.multihead_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
 
@@ -197,12 +215,23 @@ class CrossAttentionLayer(nn.Module):
         query_pos: Optional[Tensor] = None,
     ):
         if self.normalize_before:
-            return self.forward_pre(tgt, memory, memory_mask, memory_key_padding_mask, pos, query_pos)
-        return self.forward_post(tgt, memory, memory_mask, memory_key_padding_mask, pos, query_pos)
+            return self.forward_pre(
+                tgt, memory, memory_mask, memory_key_padding_mask, pos, query_pos
+            )
+        return self.forward_post(
+            tgt, memory, memory_mask, memory_key_padding_mask, pos, query_pos
+        )
 
 
 class FFNLayer(nn.Module):
-    def __init__(self, d_model, dim_feedforward=2048, dropout=0.0, activation="relu", normalize_before=False):
+    def __init__(
+        self,
+        d_model,
+        dim_feedforward=2048,
+        dropout=0.0,
+        activation="relu",
+        normalize_before=False,
+    ):
         super().__init__()
         # Implementation of Feedforward model
         self.linear1 = nn.Linear(d_model, dim_feedforward)
@@ -260,7 +289,9 @@ class MLP(nn.Module):
         super().__init__()
         self.num_layers = num_layers
         h = [hidden_dim] * (num_layers - 1)
-        self.layers = nn.ModuleList(nn.Linear(n, k) for n, k in zip([input_dim] + h, h + [output_dim]))
+        self.layers = nn.ModuleList(
+            nn.Linear(n, k) for n, k in zip([input_dim] + h, h + [output_dim])
+        )
 
     def forward(self, x):
         for i, layer in enumerate(self.layers):
@@ -382,7 +413,10 @@ class MultiScaleMaskedTransformerDecoder(nn.Module):
         for i in range(self.num_feature_levels):
             size_list.append(x[i].shape[-2:])
             pos.append(self.pe_layer(x[i], None).flatten(2))
-            src.append(self.input_proj[i](x[i]).flatten(2) + self.level_embed.weight[i][None, :, None])
+            src.append(
+                self.input_proj[i](x[i]).flatten(2)
+                + self.level_embed.weight[i][None, :, None]
+            )
 
             # flatten NxCxHxW to HWxNxC
             pos[-1] = pos[-1].permute(2, 0, 1)
@@ -408,7 +442,9 @@ class MultiScaleMaskedTransformerDecoder(nn.Module):
             level_index = i % self.num_feature_levels
             attn_mask[torch.where(attn_mask.sum(-1) == attn_mask.shape[-1])] = False
             # attention: cross-attention first
-            output = self.transformer_cross_attention_layers[i](
+            output = self.transformer_cross_attention_layers[
+                i
+            ](
                 output,
                 src[level_index],
                 memory_mask=attn_mask,
@@ -425,7 +461,9 @@ class MultiScaleMaskedTransformerDecoder(nn.Module):
             output = self.transformer_ffn_layers[i](output)
 
             outputs_class, outputs_mask, attn_mask = self.forward_prediction_heads(
-                output, mask_features, attn_mask_target_size=size_list[(i + 1) % self.num_feature_levels]
+                output,
+                mask_features,
+                attn_mask_target_size=size_list[(i + 1) % self.num_feature_levels],
             )
             predictions_class.append(outputs_class)
             predictions_mask.append(outputs_mask)
@@ -436,7 +474,8 @@ class MultiScaleMaskedTransformerDecoder(nn.Module):
             "pred_logits": predictions_class[-1],
             "pred_masks": predictions_mask[-1],
             "aux_outputs": self._set_aux_loss(
-                predictions_class if self.mask_classification else None, predictions_mask
+                predictions_class if self.mask_classification else None,
+                predictions_mask,
             ),
         }
         return out
@@ -450,11 +489,21 @@ class MultiScaleMaskedTransformerDecoder(nn.Module):
 
         # NOTE: prediction is of higher-resolution
         # [B, Q, H, W] -> [B, Q, H*W] -> [B, h, Q, H*W] -> [B*h, Q, HW]
-        attn_mask = F.interpolate(outputs_mask, size=attn_mask_target_size, mode="bilinear", align_corners=False)
+        attn_mask = F.interpolate(
+            outputs_mask,
+            size=attn_mask_target_size,
+            mode="bilinear",
+            align_corners=False,
+        )
         # must use bool type
         # If a BoolTensor is provided, positions with ``True`` are not allowed to attend while ``False`` values will be unchanged.
         attn_mask = (
-            attn_mask.sigmoid().flatten(2).unsqueeze(1).repeat(1, self.num_heads, 1, 1).flatten(0, 1) < 0.5
+            attn_mask.sigmoid()
+            .flatten(2)
+            .unsqueeze(1)
+            .repeat(1, self.num_heads, 1, 1)
+            .flatten(0, 1)
+            < 0.5
         ).bool()
         attn_mask = attn_mask.detach()
 
@@ -466,6 +515,9 @@ class MultiScaleMaskedTransformerDecoder(nn.Module):
         # doesn't support dictionary with non-homogeneous values, such
         # as a dict having both a Tensor and a list.
         if self.mask_classification:
-            return [{"pred_logits": a, "pred_masks": b} for a, b in zip(outputs_class[:-1], outputs_seg_masks[:-1])]
+            return [
+                {"pred_logits": a, "pred_masks": b}
+                for a, b in zip(outputs_class[:-1], outputs_seg_masks[:-1])
+            ]
         else:
             return [{"pred_masks": b} for b in outputs_seg_masks[:-1]]
