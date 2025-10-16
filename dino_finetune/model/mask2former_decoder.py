@@ -140,42 +140,30 @@ class MaskedXAttn(nn.Module):
         """
         q:   [B, Nq, C]
         kv:  [B, HW, C]
-        mask: binary mask per query over kv positions [B, Nq, HW] or None
+        mask: binaria por query sobre K/V [B, Nq, HW] o None
         """
         qn = self.norm_q(q)
         kvn = self.norm_kv(kv)
 
-        # Build key padding mask: True = "to be masked out"
-        key_padding = None
-        if mask is not None:
-            # we want attention only INSIDE mask -> mask==0 means pad (exclude)
-            key_padding = ~(mask.bool())  # [B, Nq, HW] (True = don't attend)
-            # multihead_attn expects key_padding_mask shape [B, HW]; we do it per-query via loop
-            outs = []
-            for b in range(q.shape[0]):
-                qb = qn[b : b + 1]  # [1, Nq, C]
-                kvb = kvn[b : b + 1]  # [1, HW, C]
-                outb = []
-                for qi in range(q.shape[1]):
-                    # kpm = key_padding[b, qi]  # [HW]
-                    # o, _ = self.attn(
-                    #     qb[:, qi : qi + 1, :], kvb, kvb, key_padding_mask=kpm
-                    # )  # [1,1,C]
-                    # mask build (dentro de MaskedXAttn.forward)
-                    kpm = key_padding[b, qi]  # [HW]
-                    kpm = kpm.unsqueeze(0).to(torch.bool)  # [1, HW]  <-- FIX
-                    o, _ = self.attn(
-                        qb[:, qi : qi + 1, :], kvb, kvb, key_padding_mask=kpm
-                    )
-
-                    outb.append(o)
-                outb = torch.cat(outb, dim=1)
-                outs.append(outb)
-            out = torch.cat(outs, dim=0)  # [B,Nq,C]
-            return out
-        else:
+        if mask is None:
             out, _ = self.attn(qn, kvn, kvn, key_padding_mask=None)
             return out
+
+        outs = []
+        B, Nq, HW = mask.shape
+        for b in range(B):
+            qb = qn[b : b + 1]  # [1, Nq, C]
+            kvb = kvn[b : b + 1]  # [1, HW, C]
+            outb = []
+            for qi in range(Nq):
+                kpm = (~mask[b, qi].bool()).unsqueeze(0)  # [1, HW]; True = “no atender”
+                if kpm.all():  # <-- máscara vacía: evita NaNs
+                    kpm = None  # atención global para este query
+                o, _ = self.attn(qb[:, qi : qi + 1, :], kvb, kvb, key_padding_mask=kpm)
+                outb.append(o)
+            outb = torch.cat(outb, dim=1)  # [1, Nq, C]
+            outs.append(outb)
+        return torch.cat(outs, dim=0)  # [B, Nq, C]
 
 
 class DecoderLayer(nn.Module):
@@ -272,35 +260,24 @@ class Mask2FormerHead(nn.Module):
 
         # 3) Transformer decoder with masked attention; round-robin multi-scale K/V (1/32 -> 1/16 -> 1/8 -> repeat)
         kvs = [self._hw_flatten(x) for x in feats_for_round_robin]  # [l32,l16,l08]
-        sizes = [
-            x.shape[-2:] for x in feats_for_round_robin
-        ]  # [(H32,W32),(H16,W16),(H08,W08)]
+        sizes = [x.shape[-2:] for x in feats_for_round_robin]
 
         for i, layer in enumerate(self.decoder_layers):
             idx = i % len(kvs)
             kv = kvs[idx]
             h, w = sizes[idx]
 
-            # redimensiona la máscara 1/4 -> h,w del kv actual
+            # máscara a la resolución actual
             m_res = F.interpolate(mask_bin.float(), size=(h, w), mode="nearest").to(
                 torch.bool
-            )
-            queries = layer(queries, kv, m_res.flatten(2))
+            )  # [B,Nq,h,w]
+            m_res = m_res.flatten(2)  # [B,Nq,HW]
 
-            # refresca máscaras a 1/4 (como tenías)
+            queries = layer(queries, kv, m_res)
+
+            # refresca las máscaras (sigue en 1/4)
             mask_logits = torch.einsum("bqc, bchw -> bqhw", queries, proj)
             mask_bin = (mask_logits.sigmoid() > 0.5).detach()
-
-        # kvs = [self._hw_flatten(x) for x in feats_for_round_robin]  # each [B, HWs, C]
-        # for i, layer in enumerate(self.decoder_layers):
-        #     kv = kvs[i % len(kvs)]
-        #     queries = layer(
-        #         queries, kv, mask_bin.flatten(2)
-        #     )  # mask_bin -> [B,Nq,HW4] (we keep HW4 grid)
-
-        #     # refresh masks each layer (like auxiliary loss points); re-use same per-pixel proj space
-        #     mask_logits = torch.einsum("bqc, bchw -> bqhw", queries, proj)
-        #     mask_bin = (mask_logits.sigmoid() > 0.5).detach()
 
         class_logits = self.class_head(queries)  # [B,Nq,C+1]
         masks_out = mask_logits  # [B,Nq,H4,W4]

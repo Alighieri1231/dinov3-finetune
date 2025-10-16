@@ -135,21 +135,20 @@ class DINOEncoderLoRA(nn.Module):
             logits = self.decoder(feature)
 
         elif self.use_mask2former:
-            # Use the same intermediate layers you used for FPN; they must be [B,C,H,W]
             inter_feats = self.encoder.get_intermediate_layers(
                 x, n=self.inter_layers, reshape=True
             )
             out = self.decoder(inter_feats, img_size_hw=x.shape[-2:])
-            # If you want per-pixel class map (semantic seg), combine masks & class logits:
-            class_logits = out["class_logits"]  # [B,Nq,C+1]
-            mask_logits = out["mask_logits"]  # [B,Nq,H,W]
-            mask_probs = mask_logits.sigmoid()  # [B, Nq, H, W]
-            class_probs = F.softmax(class_logits, dim=-1)[..., :-1]  # sin "no-object"
-            sem_logits = (
-                torch.einsum("bqhw, bqc -> bhwc", mask_probs, class_probs)
-                .permute(0, 3, 1, 2)
-                .contiguous()
-            )  # [B, C, H, W]
+
+            class_logits = out["class_logits"][..., :-1]  # [B, Nq, C] (sin "no-object")
+            mask_logits = out["mask_logits"]  # [B, Nq, H, W] (¡ya son logits!)
+
+            # Combinar en espacio de logits: logsumexp( mask_logit + class_logit )
+            # Expande dims para broadcast: [B,Nq,1,1] y [B,Nq,1,H,W] respectivamente
+            combined = class_logits.unsqueeze(-1).unsqueeze(-1) + mask_logits.unsqueeze(
+                2
+            )  # [B,Nq,C,H,W]
+            sem_logits = torch.logsumexp(combined, dim=1)  # [B, C, H, W]  <-- LOGITS
 
             return sem_logits
 
