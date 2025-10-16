@@ -76,14 +76,6 @@ class DINOEncoderLoRA(nn.Module):
         elif self.use_mask2former:
             print("Using Mask2Former decoder")
 
-            self.backbone = DINOv3_Adapter(
-                encoder=self.encoder,
-                emb_dim=emb_dim,  # ViT-L/16 => 1024
-                out_channels=m2f_hidden_dim,  # canal por nivel de la pirámide
-            )
-        elif self.use_mask2former:
-            print("Using Mask2Former decoder")
-
             # 1) Adapter con el backbone correcto + índices de ViT-L
             self.backbone = DINOv3_Adapter(
                 backbone=self.encoder,  # <-- importante
