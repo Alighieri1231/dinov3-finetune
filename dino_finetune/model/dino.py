@@ -75,22 +75,31 @@ class DINOEncoderLoRA(nn.Module):
 
         elif self.use_mask2former:
             print("Using Mask2Former decoder")
-            # tu adapter convierte ViT -> pirámide [P3, P4, P5] con C = m2f_hidden_dim
+
+            # 1) backbone que entrega UN DICCIONARIO de features con claves "1","2","3","4"
+            #    cada uno (B, m2f_hidden_dim, H_i, W_i) con strides ~ [4,8,16,32]
             self.backbone = DINOv3_Adapter(
                 encoder=self.encoder,
-                emb_dim=emb_dim,  # ojo: ViT-L sigue siendo 1024, no 1048
-                out_channels=m2f_hidden_dim,
+                emb_dim=emb_dim,  # ViT-L/16 => 1024
+                out_channels=m2f_hidden_dim,  # canal por nivel de la pirámide
             )
+
+            # 2) input_shape para el head (channels, H, W, stride). H/W pueden ser None.
+            input_shape = {
+                "1": (m2f_hidden_dim, None, None, 4),
+                "2": (m2f_hidden_dim, None, None, 8),
+                "3": (m2f_hidden_dim, None, None, 16),
+                "4": (m2f_hidden_dim, None, None, 32),
+            }
+
+            # 3) instancia del head oficial
             self.decoder = Mask2FormerHead(
-                in_channels=m2f_hidden_dim,
-                num_classes=n_classes,  # sin background; el head añade +1
+                input_shape=input_shape,
                 hidden_dim=m2f_hidden_dim,
-                num_queries=m2f_queries,
-                nheads=m2f_heads,
-                dim_feedforward=m2f_dim_ffn,
-                dec_layers=m2f_dec_layers,
-                mask_dim=m2f_hidden_dim,
-                enforce_input_project=True,
+                num_classes=n_classes,  # num clases semánticas (incluye background)
+                loss_weight=1.0,
+                ignore_value=255,  # tu dataset usa 255 como ignore
+                transformer_in_feature="multi_scale_pixel_decoder",  # default del head
             )
 
         else:
@@ -151,8 +160,10 @@ class DINOEncoderLoRA(nn.Module):
             logits = self.decoder(feature)
 
         elif self.use_mask2former:
-            feats = self.backbone(x)  # [P3,P4,P5], cada uno (B, C=hidden_dim, H, W)
-            out = self.decoder(feats)  # dict: pred_logits, pred_masks, aux_outputs
+            features_dict = self.backbone(x)  # dict con claves "1","2","3","4"
+            out = self.decoder(
+                features_dict
+            )  # dict: {"pred_logits","pred_masks","aux_outputs"}
             return out
 
         else:

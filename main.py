@@ -34,15 +34,29 @@ IGNORE_INDEX = 255
 
 def mask2former_to_pixel_logits(outputs: dict):
     """
-    Convierte salida de Mask2Former a logits por píxel (B,C,H,W).
-    Usa: scores = sum_q softmax(logits)[..., :-1] * sigmoid(masks).
+    Convierte salida de Mask2Former a logits por píxel con canal de background.
+    Foreground: sum_q softmax(logits)[..., :-1] * sigmoid(masks).
+    Background: 1 - max_c foreground_score_c (clamp).
+    Devuelve (B, C_semantic, H, W), donde C_semantic = (#foreground + 1 background).
     """
-    pred_logits = outputs["pred_logits"]  # (B, Q, C+1)
+    pred_logits = outputs["pred_logits"]  # (B, Q, C_f+1)  (f = foreground)
     pred_masks = outputs["pred_masks"]  # (B, Q, H, W)
-    class_prob = pred_logits.softmax(dim=-1)[..., :-1]  # (B,Q,C) sin background
-    mask_prob = pred_masks.sigmoid()  # (B,Q,H,W)
-    pixel_scores = torch.einsum("bqc,bqhw->bchw", class_prob, mask_prob)  # (B,C,H,W)
-    # Si tus pérdidas esperan "logits", puedes usar scores tal cual o hacer logit(s)
+
+    class_prob_full = pred_logits.softmax(dim=-1)  # (B, Q, C_f+1)
+    class_prob_fg = class_prob_full[..., :-1]  # (B, Q, C_f)
+    mask_prob = pred_masks.sigmoid()  # (B, Q, H, W)
+
+    # Foreground scores: (B, C_f, H, W)
+    fg_scores = torch.einsum("bqc,bqhw->bchw", class_prob_fg, mask_prob)
+
+    # Background score: 1 - max foreground score
+    bg_score = 1.0 - fg_scores.max(dim=1, keepdim=True).values
+    bg_score = bg_score.clamp(0.0, 1.0)  # estabilidad
+
+    # Apila background + foreground -> (B, 1 + C_f, H, W)
+    pixel_scores = torch.cat([bg_score, fg_scores], dim=1)
+
+    # A logits (para CE): log(p/(1-p)), con clamp
     eps = 1e-6
     pixel_logits = torch.log(pixel_scores.clamp_min(eps)) - torch.log1p(
         -pixel_scores.clamp_max(1 - eps)
