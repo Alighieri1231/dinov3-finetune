@@ -378,7 +378,7 @@ def get_dataloader(
         batch_size=batch_size,
         num_workers=n_workers,
         pin_memory=True,
-        prefetch_factor=2,
+        prefetch_factor=4,
         persistent_workers=True,
         shuffle=True,
     )
