@@ -1,10 +1,9 @@
-# utils.py
-from typing import Optional, Dict
+from typing import Optional
+import numpy as np
+from typing import Dict
 import torch
 
-# =========================
-#  IoU medio (tu función, sin cambios)
-# =========================
+
 def compute_iou_metric(
     y_hat: torch.Tensor,
     y: torch.Tensor,
@@ -27,15 +26,15 @@ def compute_iou_metric(
     """
     num_classes = int(y.max().item() + 1)
     y_hat = torch.argmax(y_hat, dim=1)
-    
+
     ious = []
     for c in range(num_classes):
-        y_hat_c = (y_hat == c)
-        y_c = (y == c)
+        y_hat_c = y_hat == c
+        y_c = y == c
 
         # Ignore all regions with ignore
         if ignore_index is not None:
-            mask = (y != ignore_index)
+            mask = y != ignore_index
             y_hat_c = y_hat_c & mask
             y_c = y_c & mask
 
@@ -46,6 +45,7 @@ def compute_iou_metric(
             ious.append((intersection + eps) / (union + eps))
 
     return torch.mean(torch.stack(ious))
+
 
 # =========================
 #  Dice medio (mismo patrón que el IoU)
@@ -63,11 +63,11 @@ def compute_dice_metric(
 
     dices = []
     for c in range(num_classes):
-        pred_c = (y_pred == c)
-        true_c = (y == c)
+        pred_c = y_pred == c
+        true_c = y == c
 
         if ignore_index is not None:
-            mask = (y != ignore_index)
+            mask = y != ignore_index
             pred_c = pred_c & mask
             true_c = true_c & mask
 
@@ -101,7 +101,7 @@ def per_class_dice_iou(
 
     out: Dict[int, Dict[str, float]] = {}
     if ignore_index is not None:
-        valid = (y != ignore_index)
+        valid = y != ignore_index
     else:
         valid = torch.ones_like(y, dtype=torch.bool)
 
@@ -119,7 +119,11 @@ def per_class_dice_iou(
 
         # Dice
         denom_dice = 2 * tp + fp + fn
-        dice = ((2 * tp + eps) / (denom_dice + eps)).item() if denom_dice > 0 else float("nan")
+        dice = (
+            ((2 * tp + eps) / (denom_dice + eps)).item()
+            if denom_dice > 0
+            else float("nan")
+        )
 
         out[c] = {"Dice": float(dice), "IoU": float(iou)}
 
@@ -147,9 +151,170 @@ def foreground_mean_dice_iou(
         return {"Dice": float("nan"), "IoU": float("nan")}
 
     dice_vals = torch.tensor([per_cls[k]["Dice"] for k in keys], dtype=torch.float32)
-    iou_vals  = torch.tensor([per_cls[k]["IoU"]  for k in keys], dtype=torch.float32)
+    iou_vals = torch.tensor([per_cls[k]["IoU"] for k in keys], dtype=torch.float32)
 
     # Ignora NaNs al promediar
-    dice_mean = torch.nanmean(dice_vals).item() if torch.any(~torch.isnan(dice_vals)) else float("nan")
-    iou_mean  = torch.nanmean(iou_vals).item()  if torch.any(~torch.isnan(iou_vals))  else float("nan")
+    dice_mean = (
+        torch.nanmean(dice_vals).item()
+        if torch.any(~torch.isnan(dice_vals))
+        else float("nan")
+    )
+    iou_mean = (
+        torch.nanmean(iou_vals).item()
+        if torch.any(~torch.isnan(iou_vals))
+        else float("nan")
+    )
     return {"Dice": float(dice_mean), "IoU": float(iou_mean)}
+
+
+class DatasetSegMetrics:
+    """
+    Aggregates segmentation metrics over the entire dataset.
+    - Macro (nnU-Net-like): per-sample, per-class Dice/IoU then nanmean over samples;
+      foreground_mean excludes class 0.
+    - Micro (optional): sums TP/FP/FN per class across all samples, then computes Dice/IoU.
+    """
+
+    def __init__(self, num_classes: int, ignore_index: Optional[int] = None):
+        self.C = int(num_classes)
+        self.ignore_index = ignore_index
+
+        # Macro accumulators (per-class)
+        self._dice_sum = torch.zeros(self.C, dtype=torch.float64)
+        self._dice_count = torch.zeros(self.C, dtype=torch.int64)
+        self._iou_sum = torch.zeros(self.C, dtype=torch.float64)
+        self._iou_count = torch.zeros(self.C, dtype=torch.int64)
+
+        # Micro accumulators (per-class)
+        self._tp = torch.zeros(self.C, dtype=torch.float64)
+        self._fp = torch.zeros(self.C, dtype=torch.float64)
+        self._fn = torch.zeros(self.C, dtype=torch.float64)
+
+    @torch.no_grad()
+    def update(self, y_hat: torch.Tensor, y: torch.Tensor):
+        """
+        y_hat: (B, C, H, W[,(D)])
+        y    : (B, H, W[,(D)])
+        """
+        # Move to CPU for safe accumulation; keep boolean logic on device to be fast
+        device = y.device
+        B = y.shape[0]
+        pred = torch.argmax(y_hat, dim=1)  # (B, ...)
+
+        # Valid mask (ignore_index)
+        if self.ignore_index is not None:
+            valid = y != self.ignore_index
+        else:
+            valid = torch.ones_like(y, dtype=torch.bool)
+
+        for c in range(self.C):
+            # per-sample loop to do macro (case-wise) accumulation with NaN policy
+            for b in range(B):
+                pred_c = (pred[b] == c) & valid[b]
+                true_c = (y[b] == c) & valid[b]
+
+                tp = (pred_c & true_c).sum()
+                fp = (pred_c & ~true_c).sum()
+                fn = (~pred_c & true_c).sum()
+
+                denom_iou = tp + fp + fn
+                denom_dice = 2 * tp + fp + fn
+
+                # Macro: add if denom > 0 (else NaN → skip; same spirit as nnU-Net)
+                if denom_iou > 0:
+                    self._iou_sum[c] += tp.double() / denom_iou.double()
+                    self._iou_count[c] += 1
+                if denom_dice > 0:
+                    self._dice_sum[c] += (2 * tp).double() / denom_dice.double()
+                    self._dice_count[c] += 1
+
+                # Micro: always add raw counts (across dataset)
+                self._tp[c] += tp.double()
+                self._fp[c] += fp.double()
+                self._fn[c] += fn.double()
+
+    def compute(self) -> Dict[str, Dict]:
+        """Returns dict with per_class, foreground_mean (macro), and micro (optional)."""
+        # Macro per-class (nanmean behavior)
+        per_class = {}
+        fg_indices = [c for c in range(self.C) if c != 0]
+
+        dice_per_class = torch.full((self.C,), float("nan"), dtype=torch.float64)
+        iou_per_class = torch.full((self.C,), float("nan"), dtype=torch.float64)
+
+        has_dice = self._dice_count > 0
+        has_iou = self._iou_count > 0
+
+        dice_per_class[has_dice] = self._dice_sum[has_dice] / self._dice_count[has_dice]
+        iou_per_class[has_iou] = self._iou_sum[has_iou] / self._iou_count[has_iou]
+
+        for c in range(self.C):
+            per_class[c] = {
+                "Dice": float(
+                    dice_per_class[c].item()
+                    if torch.isfinite(dice_per_class[c])
+                    else float("nan")
+                ),
+                "IoU": float(
+                    iou_per_class[c].item()
+                    if torch.isfinite(iou_per_class[c])
+                    else float("nan")
+                ),
+            }
+
+        # Foreground macro mean (exclude 0), ignoring NaNs
+        fg_dice = dice_per_class[fg_indices]
+        fg_iou = iou_per_class[fg_indices]
+        fg_dice_mean = (
+            float(torch.nanmean(fg_dice).item())
+            if torch.any(torch.isfinite(fg_dice))
+            else float("nan")
+        )
+        fg_iou_mean = (
+            float(torch.nanmean(fg_iou).item())
+            if torch.any(torch.isfinite(fg_iou))
+            else float("nan")
+        )
+
+        # Micro (size-weighted) per-class and foreground mean
+        micro_per_class = {}
+        micro_fg_vals_dice, micro_fg_vals_iou = [], []
+        eps = 1e-6
+        for c in range(self.C):
+            tp, fp, fn = self._tp[c], self._fp[c], self._fn[c]
+            dice = (
+                (2 * tp + eps) / (2 * tp + fp + fn + eps)
+                if (2 * tp + fp + fn) > 0
+                else float("nan")
+            )
+            iou = (
+                (tp + eps) / (tp + fp + fn + eps)
+                if (tp + fp + fn) > 0
+                else float("nan")
+            )
+            dice = float(dice)
+            iou = float(iou)
+            micro_per_class[c] = {"Dice": dice, "IoU": iou}
+            if c != 0 and (tp + fp + fn) > 0:
+                micro_fg_vals_dice.append(dice)
+                micro_fg_vals_iou.append(iou)
+
+        micro_fg = {
+            "Dice": float(np.mean(micro_fg_vals_dice))
+            if micro_fg_vals_dice
+            else float("nan"),
+            "IoU": float(np.mean(micro_fg_vals_iou))
+            if micro_fg_vals_iou
+            else float("nan"),
+        }
+
+        return {
+            "macro": {
+                "per_class": per_class,
+                "foreground_mean": {"Dice": fg_dice_mean, "IoU": fg_iou_mean},
+            },
+            "micro": {
+                "per_class": micro_per_class,
+                "foreground_mean": micro_fg,
+            },
+        }

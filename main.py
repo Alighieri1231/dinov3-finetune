@@ -18,6 +18,7 @@ from dino_finetune.metrics import (
     compute_dice_metric,
     foreground_mean_dice_iou,
     per_class_dice_iou,
+    DatasetSegMetrics,
 )
 
 
@@ -32,6 +33,7 @@ def validate_epoch(
     criterion: nn.CrossEntropyLoss,
     metrics: dict,
 ) -> None:
+    IGNORE_INDEX = 255
     val_loss = 0.0
     val_iou = 0.0
     val_dice = 0.0
@@ -41,6 +43,9 @@ def validate_epoch(
     val_dice_per_class = {}
 
     dino_lora.eval()
+
+    # Will be initialized after first forward (to know C)
+    dataset_acc = None
     with torch.no_grad():
         pbar = tqdm.tqdm(val_loader, desc="Valid", unit="batch", leave=False)
         for images, masks in pbar:
@@ -53,6 +58,13 @@ def validate_epoch(
             )
             masks = masks.cuda(non_blocking=True).long()
             logits = dino_lora(images)
+            # init dataset-level accumulator once we know num_classes
+            if dataset_acc is None:
+                num_classes = int(logits.shape[1])
+                dataset_acc = DatasetSegMetrics(
+                    num_classes=num_classes, ignore_index=IGNORE_INDEX
+                )
+
             loss = criterion(logits, masks)
             val_loss += loss.item()
 
@@ -79,6 +91,8 @@ def validate_epoch(
                 val_iou_per_class[c].append(v["IoU"])
                 val_dice_per_class[c].append(v["Dice"])
 
+            dataset_acc.update(logits, masks)
+
             pbar.set_postfix(loss=f"{loss.item():.4f}")
     metrics["val_loss"].append(val_loss / len(val_loader))
     metrics["val_iou"].append(val_iou / len(val_loader))
@@ -91,6 +105,35 @@ def validate_epoch(
     metrics["val_dice_per_class"].append(
         {c: sum(v) / len(v) for c, v in val_dice_per_class.items()}
     )
+
+    # NEW: finalize dataset-level macro foreground means (nnU-Net-style)
+    # --- al final de validate_epoch ---
+    if dataset_acc is not None:
+        ds_results = dataset_acc.compute()
+        dice_nn = ds_results["macro"]["foreground_mean"]["Dice"]
+        iou_nn = ds_results["macro"]["foreground_mean"]["IoU"]
+        dice_nn_micro = ds_results["micro"]["foreground_mean"]["Dice"]
+        iou_nn_micro = ds_results["micro"]["foreground_mean"]["IoU"]
+
+        # per-class (nnU-Net-like)
+        nn_per_class_macro = ds_results["macro"][
+            "per_class"
+        ]  # {c: {"Dice":..., "IoU":...}}
+        nn_per_class_micro = ds_results["micro"][
+            "per_class"
+        ]  # {c: {"Dice":..., "IoU":...}}
+    else:
+        dice_nn = iou_nn = float("nan")
+        dice_nn_micro = iou_nn_micro = float("nan")
+        nn_per_class_macro = {}
+        nn_per_class_micro = {}
+
+    metrics["val_dice_nn"].append(dice_nn)
+    metrics["val_iou_nn"].append(iou_nn)
+    metrics["val_dice_nn_micro"].append(dice_nn_micro)
+    metrics["val_iou_nn_micro"].append(iou_nn_micro)
+    metrics["val_nn_per_class_macro"].append(nn_per_class_macro)  # <-- nuevo
+    metrics["val_nn_per_class_micro"].append(nn_per_class_micro)  # <-- nuevo
 
 
 def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
@@ -150,6 +193,12 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
         "val_iou_per_class": [],
         "val_dice_per_class": [],
         "val_dice": [],
+        "val_dice_nn": [],  # nnU-Net-style Dice
+        "val_iou_nn": [],  # nnU-Net-style IoU
+        "val_dice_nn_micro": [],  # nnU-Net-style micro Dice
+        "val_iou_nn_micro": [],  # nnU-Net-style micro IoU
+        "val_nn_per_class_macro": [],
+        "val_nn_per_class_micro": [],
     }
     logging.info("Starting training...")
 
@@ -235,6 +284,11 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
                         "val/dice": float(metrics["val_dice"][-1]),
                         "val/iou_fg": float(metrics["val_iou_fg"][-1]),
                         "val/dice_fg": float(metrics["val_dice_fg"][-1]),
+                        "val/dice_nn": float(metrics["val_dice_nn"][-1]),
+                        "val/iou_nn": float(metrics["val_iou_nn"][-1]),
+                        "val/dice_nn_micro": float(metrics["val_dice_nn_micro"][-1]),
+                        "val/iou_nn_micro": float(metrics["val_iou_nn_micro"][-1]),
+                        "val/global_step": global_step,  # <- publica global_step
                         "epoch": epoch,  # <- publica epoch
                     },
                     step=global_step,  # <- step = epoch
@@ -247,6 +301,26 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
                 _log_val_dict(
                     "val/dice_per_class", metrics["val_dice_per_class"][-1], global_step
                 )
+                _log_val_dict(
+                    "val/nn_per_class_macro",
+                    {k: v["IoU"] for k, v in metrics["val_nn_per_class_macro"][-1].items()},
+                    global_step,
+                )
+                _log_val_dict(
+                    "val/nn_per_class_macro_dice",
+                    {k: v["Dice"] for k, v in metrics["val_nn_per_class_macro"][-1].items()},
+                    global_step,
+                )
+                _log_val_dict(
+                    "val/nn_per_class_micro",
+                    {k: v["IoU"] for k, v in metrics["val_nn_per_class_micro"][-1].items()},
+                    global_step,
+                )
+                _log_val_dict(
+                    "val/nn_per_class_micro_dice",
+                    {k: v["Dice"] for k, v in metrics["val_nn_per_class_micro"][-1].items()},
+                    global_step,
+                )   
 
         if epoch % 25 == 0:
             if config.debug:
