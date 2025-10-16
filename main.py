@@ -44,8 +44,14 @@ def validate_epoch(
     with torch.no_grad():
         pbar = tqdm.tqdm(val_loader, desc="Valid", unit="batch", leave=False)
         for images, masks in pbar:
-            images = images.float().cuda()
-            masks = masks.long().cuda()
+            # images = images.float().cuda()
+            # masks = masks.long().cuda()
+            images = (
+                images.cuda(non_blocking=True)
+                .to(memory_format=torch.channels_last)
+                .float()
+            )
+            masks = masks.cuda(non_blocking=True).long()
             logits = dino_lora(images)
             loss = criterion(logits, masks)
             val_loss += loss.item()
@@ -98,9 +104,9 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
         use_fpn=config.use_fpn,
         use_mask2former=config.use_mask2former,
     ).cuda()
-    # dino_lora = dino_lora.to(memory_format=torch.channels_last)
-    # torch.backends.cuda.matmul.allow_tf32 = True
-    # torch.set_float32_matmul_precision("high")
+    dino_lora = dino_lora.to(memory_format=torch.channels_last)
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.set_float32_matmul_precision("high")
 
     if config.lora_weights:
         dino_lora.load_parameters(config.lora_weights)
@@ -147,6 +153,12 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
     }
     logging.info("Starting training...")
 
+    # check bf16
+    torch.backends.cudnn.benchmark = True  # perf
+    use_bf16 = torch.cuda.is_bf16_supported()
+    dtype = torch.bfloat16 if use_bf16 else torch.float16
+    scaler = torch.cuda.amp.GradScaler(enabled=(dtype is torch.float16))
+
     for epoch in range(config.epochs):
         dino_lora.train()
         running = 0.0
@@ -154,14 +166,35 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
             train_loader, desc=f"Epoch {epoch + 1}/{config.epochs}", unit="batch"
         )
         for b_idx, (images, masks) in enumerate(pbar):
-            images = images.float().cuda()
-            masks = masks.long().cuda()
+            # images = images.float().cuda()
+            # masks = masks.long().cuda()
+
+            images = (
+                images.cuda(non_blocking=True)
+                .to(memory_format=torch.channels_last)
+                .float()
+            )
+            masks = masks.cuda(
+                non_blocking=True
+            ).long()  # máscaras quedan en formato “normal”
+
             optimizer.zero_grad()
 
-            logits = dino_lora(images)
-            loss = criterion(logits, masks)
-            loss.backward()
-            optimizer.step()
+            with torch.autocast("cuda", dtype=dtype):
+                logits = dino_lora(images)
+                loss = criterion(logits, masks)
+            if dtype is torch.float16:
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                loss.backward()
+                optimizer.step()
+
+            # logits = dino_lora(images)
+            # loss = criterion(logits, masks)
+            # loss.backward()
+            # optimizer.step()
 
             running = 0.9 * running + 0.1 * loss.item() if running else loss.item()
             lr = optimizer.param_groups[0]["lr"]
