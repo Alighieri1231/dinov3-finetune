@@ -10,16 +10,19 @@
 #SBATCH --output=logs/%x-%j.out
 
 
-set -euo pipefail
+set -eo pipefail
 
-# (Optional) activar conda dentro del script
-if [ -f ~/anaconda3/etc/profile.d/conda.sh ]; then
-  source ~/anaconda3/etc/profile.d/conda.sh
-  conda activate lightning || true
-fi
+# ---- Activar conda (deshabilitar -u temporalmente) ----
+set +u
+source /software/anaconda3/5.3.0b/etc/profile.d/conda.sh
+conda activate castane_lab
+set -u
+# -------------------------------------------------------
 
-# No fijes CUDA_VISIBLE_DEVICES manualmente; Slurm lo define.
-# echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+# Variables de entorno (protegidas si están vacías)
+: "${LD_LIBRARY_PATH:=}"
+export LD_LIBRARY_PATH="/scratch/bcastane_lab/lab-conda/envs/castane_lab/lib:${LD_LIBRARY_PATH}"
+export CUDA_HOME="/scratch/bcastane_lab/lab-conda/envs/castane_lab"
 
 # === Config base ===
 PY=python
