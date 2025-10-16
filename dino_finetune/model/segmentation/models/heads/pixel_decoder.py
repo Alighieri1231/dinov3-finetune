@@ -13,10 +13,15 @@ from torch.nn import functional as F
 from torch.nn.init import normal_
 from torch.amp import autocast
 
-from dinov3.eval.segmentation.models.utils.batch_norm import get_norm
-from dinov3.eval.segmentation.models.utils.position_encoding import PositionEmbeddingSine
-from dinov3.eval.segmentation.models.utils.transformer import _get_clones, _get_activation_fn
-from dinov3.eval.segmentation.models.utils.ms_deform_attn import MSDeformAttn
+from dino_finetune.model.segmentation.models.utils.batch_norm import get_norm
+from dino_finetune.model.segmentation.models.utils.position_encoding import (
+    PositionEmbeddingSine,
+)
+from dino_finetune.model.segmentation.models.utils.transformer import (
+    _get_clones,
+    _get_activation_fn,
+)
+from dino_finetune.model.segmentation.models.utils.ms_deform_attn import MSDeformAttn
 
 
 def c2_xavier_fill(module: nn.Module) -> None:
@@ -77,7 +82,15 @@ class Conv2d(torch.nn.Conv2d):
         #                     self.norm, torch.nn.SyncBatchNorm
         #                 ), "SyncBatchNorm does not support empty inputs!"
 
-        x = F.conv2d(x, self.weight, self.bias, self.stride, self.padding, self.dilation, self.groups)
+        x = F.conv2d(
+            x,
+            self.weight,
+            self.bias,
+            self.stride,
+            self.padding,
+            self.dilation,
+            self.groups,
+        )
         if self.norm is not None:
             x = self.norm(x)
         if self.activation is not None:
@@ -104,7 +117,13 @@ class MSDeformAttnTransformerEncoderOnly(nn.Module):
         self.nhead = nhead
 
         encoder_layer = MSDeformAttnTransformerEncoderLayer(
-            d_model, dim_feedforward, dropout, activation, num_feature_levels, nhead, enc_n_points
+            d_model,
+            dim_feedforward,
+            dropout,
+            activation,
+            num_feature_levels,
+            nhead,
+            enc_n_points,
         )
         self.encoder = MSDeformAttnTransformerEncoder(encoder_layer, num_encoder_layers)
 
@@ -131,7 +150,12 @@ class MSDeformAttnTransformerEncoderOnly(nn.Module):
         return valid_ratio
 
     def forward(self, srcs, pos_embeds):
-        masks = [torch.zeros((x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool) for x in srcs]
+        masks = [
+            torch.zeros(
+                (x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool
+            )
+            for x in srcs
+        ]
         # prepare input for encoder
         src_flatten = []
         mask_flatten = []
@@ -151,20 +175,38 @@ class MSDeformAttnTransformerEncoderOnly(nn.Module):
         src_flatten = torch.cat(src_flatten, 1)
         mask_flatten = torch.cat(mask_flatten, 1)
         lvl_pos_embed_flatten = torch.cat(lvl_pos_embed_flatten, 1)
-        spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=src_flatten.device)
-        level_start_index = torch.cat((spatial_shapes.new_zeros((1,)), spatial_shapes.prod(1).cumsum(0)[:-1]))
+        spatial_shapes = torch.as_tensor(
+            spatial_shapes, dtype=torch.long, device=src_flatten.device
+        )
+        level_start_index = torch.cat(
+            (spatial_shapes.new_zeros((1,)), spatial_shapes.prod(1).cumsum(0)[:-1])
+        )
         valid_ratios = torch.stack([self.get_valid_ratio(m) for m in masks], 1)
 
         # encoder
         memory = self.encoder(
-            src_flatten, spatial_shapes, level_start_index, valid_ratios, lvl_pos_embed_flatten, mask_flatten
+            src_flatten,
+            spatial_shapes,
+            level_start_index,
+            valid_ratios,
+            lvl_pos_embed_flatten,
+            mask_flatten,
         )
 
         return memory, spatial_shapes, level_start_index
 
 
 class MSDeformAttnTransformerEncoderLayer(nn.Module):
-    def __init__(self, d_model=256, d_ffn=1024, dropout=0.1, activation="relu", n_levels=4, n_heads=8, n_points=4):
+    def __init__(
+        self,
+        d_model=256,
+        d_ffn=1024,
+        dropout=0.1,
+        activation="relu",
+        n_levels=4,
+        n_heads=8,
+        n_points=4,
+    ):
         super().__init__()
 
         # self attention
@@ -190,10 +232,23 @@ class MSDeformAttnTransformerEncoderLayer(nn.Module):
         src = self.norm2(src)
         return src
 
-    def forward(self, src, pos, reference_points, spatial_shapes, level_start_index, padding_mask=None):
+    def forward(
+        self,
+        src,
+        pos,
+        reference_points,
+        spatial_shapes,
+        level_start_index,
+        padding_mask=None,
+    ):
         # self attention
         src2 = self.self_attn(
-            self.with_pos_embed(src, pos), reference_points, src, spatial_shapes, level_start_index, padding_mask
+            self.with_pos_embed(src, pos),
+            reference_points,
+            src,
+            spatial_shapes,
+            level_start_index,
+            padding_mask,
         )
         src = src + self.dropout1(src2)
         src = self.norm1(src)
@@ -226,11 +281,28 @@ class MSDeformAttnTransformerEncoder(nn.Module):
         reference_points = reference_points[:, :, None] * valid_ratios[:, None]
         return reference_points
 
-    def forward(self, src, spatial_shapes, level_start_index, valid_ratios, pos=None, padding_mask=None):
+    def forward(
+        self,
+        src,
+        spatial_shapes,
+        level_start_index,
+        valid_ratios,
+        pos=None,
+        padding_mask=None,
+    ):
         output = src
-        reference_points = self.get_reference_points(spatial_shapes, valid_ratios, device=src.device)
+        reference_points = self.get_reference_points(
+            spatial_shapes, valid_ratios, device=src.device
+        )
         for _, layer in enumerate(self.layers):
-            output = layer(output, pos, reference_points, spatial_shapes, level_start_index, padding_mask)
+            output = layer(
+                output,
+                pos,
+                reference_points,
+                spatial_shapes,
+                level_start_index,
+                padding_mask,
+            )
 
         return output
 
@@ -240,7 +312,9 @@ class MSDeformAttnPixelDecoder(nn.Module):
     # @configurable
     def __init__(
         self,
-        input_shape: Dict[str, Tuple[int]],  # ShapeSpec: [channels, height, width, stride]
+        input_shape: Dict[
+            str, Tuple[int]
+        ],  # ShapeSpec: [channels, height, width, stride]
         *,
         transformer_dropout: float,
         transformer_nheads: int,
@@ -266,7 +340,9 @@ class MSDeformAttnPixelDecoder(nn.Module):
             norm (str or callable): normalization for all conv layers
         """
         super().__init__()
-        transformer_input_shape = {k: v for k, v in input_shape.items() if k in transformer_in_features}
+        transformer_input_shape = {
+            k: v for k, v in input_shape.items() if k in transformer_in_features
+        }
 
         # this is the input shape of pixel decoder  # ShapeSpec: [channels, height, width, stride]
         input_shape = sorted(input_shape.items(), key=lambda x: x[1][-1])
@@ -275,12 +351,20 @@ class MSDeformAttnPixelDecoder(nn.Module):
         self.feature_channels = [v[0] for k, v in input_shape]
 
         # this is the input shape of transformer encoder (could use less features than pixel decoder
-        transformer_input_shape = sorted(transformer_input_shape.items(), key=lambda x: x[1][-1])
-        self.transformer_in_features = [k for k, v in transformer_input_shape]  # starting from "res2" to "res5"
+        transformer_input_shape = sorted(
+            transformer_input_shape.items(), key=lambda x: x[1][-1]
+        )
+        self.transformer_in_features = [
+            k for k, v in transformer_input_shape
+        ]  # starting from "res2" to "res5"
         transformer_in_channels = [v[0] for k, v in transformer_input_shape]
-        self.transformer_feature_strides = [v[-1] for k, v in transformer_input_shape]  # to decide extra FPN layers
+        self.transformer_feature_strides = [
+            v[-1] for k, v in transformer_input_shape
+        ]  # to decide extra FPN layers
 
-        self.transformer_num_feature_levels = 3  # TODO switch with len(self.transformer_in_features)
+        self.transformer_num_feature_levels = (
+            3  # TODO switch with len(self.transformer_in_features)
+        )
         if self.transformer_num_feature_levels > 1:
             input_proj_list = []
             # from low resolution to high resolution (res5 -> res2)
@@ -339,11 +423,15 @@ class MSDeformAttnPixelDecoder(nn.Module):
         output_convs = []
 
         use_bias = norm == ""
-        for idx, in_channels in enumerate(self.feature_channels[:1]):  # TODO self.num_fpn_levels]):
+        for idx, in_channels in enumerate(
+            self.feature_channels[:1]
+        ):  # TODO self.num_fpn_levels]):
             lateral_norm = get_norm(norm, conv_dim)
             output_norm = get_norm(norm, conv_dim)
 
-            lateral_conv = Conv2d(in_channels, conv_dim, kernel_size=1, bias=use_bias, norm=lateral_norm)
+            lateral_conv = Conv2d(
+                in_channels, conv_dim, kernel_size=1, bias=use_bias, norm=lateral_norm
+            )
             output_conv = Conv2d(
                 conv_dim,
                 conv_dim,
@@ -371,7 +459,9 @@ class MSDeformAttnPixelDecoder(nn.Module):
         srcs = []
         pos = []
         # Reverse feature maps into top-down order (from low to high resolution)
-        for idx, f in enumerate(self.transformer_in_features[::-1][:-1]):  # TODO remove [:-1]
+        for idx, f in enumerate(
+            self.transformer_in_features[::-1][:-1]
+        ):  # TODO remove [:-1]
             x = features[f].float()  # deformable detr does not support half precision
             srcs.append(self.input_convs[idx](x))
             pos.append(self.pe_layer(x))
@@ -382,7 +472,9 @@ class MSDeformAttnPixelDecoder(nn.Module):
         split_size_or_sections = [None] * self.transformer_num_feature_levels
         for i in range(self.transformer_num_feature_levels):
             if i < self.transformer_num_feature_levels - 1:
-                split_size_or_sections[i] = level_start_index[i + 1] - level_start_index[i]
+                split_size_or_sections[i] = (
+                    level_start_index[i + 1] - level_start_index[i]
+                )
             else:
                 split_size_or_sections[i] = y.shape[1] - level_start_index[i]
         y = torch.split(y, split_size_or_sections, dim=1)
@@ -391,17 +483,25 @@ class MSDeformAttnPixelDecoder(nn.Module):
         multi_scale_features = []
         num_cur_levels = 0
         for i, z in enumerate(y):
-            out.append(z.transpose(1, 2).view(bs, -1, spatial_shapes[i][0], spatial_shapes[i][1]))
+            out.append(
+                z.transpose(1, 2).view(
+                    bs, -1, spatial_shapes[i][0], spatial_shapes[i][1]
+                )
+            )
 
         # append `out` with extra FPN levels
         # Reverse feature maps into top-down order (from low to high resolution)
-        for idx, f in enumerate(self.in_features[0]):  # TODO re put [:self.num_fpn_levels][::-1]):
+        for idx, f in enumerate(
+            self.in_features[0]
+        ):  # TODO re put [:self.num_fpn_levels][::-1]):
             x = features[f].float()
             lateral_conv = self.lateral_convs[idx]
             output_conv = self.output_convs[idx]
             cur_fpn = lateral_conv(x)
             # Following FPN implementation, we use nearest upsampling here
-            y = cur_fpn + F.interpolate(out[-1], size=cur_fpn.shape[-2:], mode="bilinear", align_corners=False)
+            y = cur_fpn + F.interpolate(
+                out[-1], size=cur_fpn.shape[-2:], mode="bilinear", align_corners=False
+            )
             y = output_conv(y)
             out.append(y)
 
