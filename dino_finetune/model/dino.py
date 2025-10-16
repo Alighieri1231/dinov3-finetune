@@ -46,6 +46,7 @@ class DINOEncoderLoRA(nn.Module):
         # Number of previous layers to use as input
         self.inter_layers = 4
         self.use_fpn = use_fpn
+        self.use_mask2former = use_mask2former
 
         self.encoder = encoder
         for param in self.encoder.parameters():
@@ -129,6 +130,7 @@ class DINOEncoderLoRA(nn.Module):
                 x, n=self.inter_layers, reshape=True
             )
             logits = self.decoder(feature)
+
         elif self.use_mask2former:
             # Use the same intermediate layers you used for FPN; they must be [B,C,H,W]
             inter_feats = self.encoder.get_intermediate_layers(
@@ -138,16 +140,14 @@ class DINOEncoderLoRA(nn.Module):
             # If you want per-pixel class map (semantic seg), combine masks & class logits:
             class_logits = out["class_logits"]  # [B,Nq,C+1]
             mask_logits = out["mask_logits"]  # [B,Nq,H,W]
-            # Semantic logits: sum masks weighted by class logits (excluding "no-object"):
+            mask_probs = mask_logits.sigmoid()  # [B, Nq, H, W]
+            class_probs = F.softmax(class_logits, dim=-1)[..., :-1]  # sin "no-object"
             sem_logits = (
-                torch.einsum(
-                    "bqhw, bqc -> bhwc",
-                    mask_logits,
-                    F.softmax(class_logits, dim=-1)[..., :-1],  # drop "no-object"
-                )
+                torch.einsum("bqhw, bqc -> bhwc", mask_probs, class_probs)
                 .permute(0, 3, 1, 2)
                 .contiguous()
-            )  # [B,C,H,W]
+            )  # [B, C, H, W]
+
             return sem_logits
 
         else:

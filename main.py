@@ -96,6 +96,7 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
         n_classes=config.n_classes,
         use_lora=config.use_lora,
         use_fpn=config.use_fpn,
+        use_mask2former=False,
     ).cuda()
 
     if config.lora_weights:
@@ -276,6 +277,11 @@ if __name__ == "__main__":
         help="Use the FPN decoder for finetuning",
     )
     parser.add_argument(
+        "--use_mask2former",
+        action="store_true",
+        help="Use the Mask2Former decoder for finetuning",
+    )
+    parser.add_argument(
         "--img_dim",
         type=int,
         nargs=2,
@@ -370,12 +376,21 @@ if __name__ == "__main__":
     #     repo_or_dir=f"facebookresearch/{config.dino_type}",
     #     model=backbones[config.size],
     # ).cuda()
-    encoder = torch.hub.load(
-        "/scratch/bcastane_lab/eochoaal/dinov3",
-        "dinov3_vitl16",
-        source="local",
-        weights="/scratch/bcastane_lab/eochoaal/dinov3/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
-    ).cuda()
+
+    if logging.root=="/home/exx/Documents/nnUNetFrame/dataset/nnUNet_raw":
+        encoder = torch.hub.load(
+                    "data/GitHub/dinov3",
+                    "dinov3_vitl16",
+                    source="local",
+                    weights="/data/GitHub/dinov3/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
+                ).cuda()
+    else:
+        encoder = torch.hub.load(
+            "/scratch/bcastane_lab/eochoaal/dinov3",
+            "dinov3_vitl16",
+            source="local",
+            weights="/scratch/bcastane_lab/eochoaal/dinov3/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
+        ).cuda()
 
     if config.wandb:
         wandb.init(
