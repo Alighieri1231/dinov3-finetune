@@ -87,10 +87,10 @@ class DINOEncoderLoRA(nn.Module):
 
             # 2) input_shape al estilo Meta (stride=4 en todas las entradas)
             input_shape = {
-                "1": [embed_dim, patch * 4, patch * 4, 4],
-                "2": [embed_dim, patch * 2, patch * 2, 4],
-                "3": [embed_dim, patch, patch, 4],
-                "4": [embed_dim, patch // 2, patch // 2, 4],
+                "1": (embed_dim, patch * 4, patch * 4, 4),
+                "2": (embed_dim, patch * 2, patch * 2, 4),
+                "3": (embed_dim, patch, patch, 4),
+                "4": (embed_dim, patch // 2, patch // 2, 4),
             }
 
             # 3) Head oficial (puedes usar hidden_dim=256 para ahorrar memoria)
