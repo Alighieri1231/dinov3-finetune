@@ -96,7 +96,7 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
         n_classes=config.n_classes,
         use_lora=config.use_lora,
         use_fpn=config.use_fpn,
-        use_mask2former=False,
+        use_mask2former=config.use_mask2former,
     ).cuda()
 
     if config.lora_weights:
@@ -377,13 +377,13 @@ if __name__ == "__main__":
     #     model=backbones[config.size],
     # ).cuda()
 
-    if config.root=="/home/exx/Documents/nnUNetFrame/dataset/nnUNet_raw":
+    if config.root == "/home/exx/Documents/nnUNetFrame/dataset/nnUNet_raw":
         encoder = torch.hub.load(
-                    "/data/GitHub/dinov3",
-                    "dinov3_vitl16",
-                    source="local",
-                    weights="/data/GitHub/dinov3/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
-                ).cuda()
+            "/data/GitHub/dinov3",
+            "dinov3_vitl16",
+            source="local",
+            weights="/data/GitHub/dinov3/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
+        ).cuda()
     else:
         encoder = torch.hub.load(
             "/scratch/bcastane_lab/eochoaal/dinov3",
