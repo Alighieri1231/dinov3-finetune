@@ -27,11 +27,35 @@ def _log_val_dict(prefix: str, d: dict, step: int):
     wandb.log(flat, step=step)  # aquí step será 'epoch'
 
 
+from dino_finetune.model.segmentation.loss import CrossEntropyLoss  # <- de tu loss.py
+
+IGNORE_INDEX = 255
+
+
+def mask2former_to_pixel_logits(outputs: dict):
+    """
+    Convierte salida de Mask2Former a logits por píxel (B,C,H,W).
+    Usa: scores = sum_q softmax(logits)[..., :-1] * sigmoid(masks).
+    """
+    pred_logits = outputs["pred_logits"]  # (B, Q, C+1)
+    pred_masks = outputs["pred_masks"]  # (B, Q, H, W)
+    class_prob = pred_logits.softmax(dim=-1)[..., :-1]  # (B,Q,C) sin background
+    mask_prob = pred_masks.sigmoid()  # (B,Q,H,W)
+    pixel_scores = torch.einsum("bqc,bqhw->bchw", class_prob, mask_prob)  # (B,C,H,W)
+    # Si tus pérdidas esperan "logits", puedes usar scores tal cual o hacer logit(s)
+    eps = 1e-6
+    pixel_logits = torch.log(pixel_scores.clamp_min(eps)) - torch.log1p(
+        -pixel_scores.clamp_max(1 - eps)
+    )
+    return pixel_logits
+
+
 def validate_epoch(
     dino_lora: nn.Module,
     val_loader: DataLoader,
     criterion: nn.CrossEntropyLoss,
     metrics: dict,
+    use_mask2former: bool = False,
 ) -> None:
     IGNORE_INDEX = 255
     val_loss = 0.0
@@ -57,7 +81,14 @@ def validate_epoch(
                 .float()
             )
             masks = masks.cuda(non_blocking=True).long()
-            logits = dino_lora(images)
+            outputs = dino_lora(images)
+            if use_mask2former:
+                logits = mask2former_to_pixel_logits(outputs)  # (B,C,H,W)
+            else:
+                logits = outputs
+            loss = criterion(logits, masks)
+            y_hat = torch.sigmoid(logits)
+
             # init dataset-level accumulator once we know num_classes
             if dataset_acc is None:
                 num_classes = int(logits.shape[1])
@@ -65,10 +96,7 @@ def validate_epoch(
                     num_classes=num_classes, ignore_index=IGNORE_INDEX
                 )
 
-            loss = criterion(logits, masks)
             val_loss += loss.item()
-
-            y_hat = torch.sigmoid(logits)
             iou_score = compute_iou_metric(y_hat, masks, ignore_index=255)
             # logits: (B, C, H, W) ; labels: (B, H, W)
             dice_score = compute_dice_metric(logits, masks, ignore_index=255)
@@ -165,7 +193,18 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
         n_workers=config.n_workers,
     )
     # Finetuning for segmentation
-    criterion = nn.CrossEntropyLoss(ignore_index=255).cuda()
+    # criterion = nn.CrossEntropyLoss(ignore_index=255).cuda()
+    if config.use_mask2former:
+        # Tu CrossEntropyLoss (que en realidad calcula Dice con softmax) y respeta ignore_index
+        criterion = CrossEntropyLoss(
+            reduction="mean", loss_weight=1.0, ignore_index=IGNORE_INDEX
+        ).cuda()
+        # (opcional) si quieres MultilabelDiceLoss:
+        # from loss import MultilabelDiceLoss
+        # criterion = MultilabelDiceLoss(loss_weight=1.0, ignore_index=IGNORE_INDEX).cuda()
+    else:
+        criterion = nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX).cuda()
+
     optimizer = optim.AdamW(
         dino_lora.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
@@ -229,19 +268,14 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
 
             optimizer.zero_grad()
 
-            # with torch.autocast("cuda", dtype=dtype):
-            #     logits = dino_lora(images)
-            #     loss = criterion(logits, masks)
-            # if dtype is torch.float16:
-            #     scaler.scale(loss).backward()
-            #     scaler.step(optimizer)
-            #     scaler.update()
-            # else:
-            #     loss.backward()
-            #     optimizer.step()
+            outputs = dino_lora(images)
+            if config.use_mask2former:
+                pixel_logits = mask2former_to_pixel_logits(outputs)  # (B,C,H,W)
+                loss = criterion(pixel_logits, masks)
+            else:
+                pixel_logits = outputs  # (B,C,H,W)
+                loss = criterion(pixel_logits, masks)
 
-            logits = dino_lora(images)
-            loss = criterion(logits, masks)
             loss.backward()
             optimizer.step()
 
@@ -264,8 +298,11 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
         scheduler.step()
 
         if epoch % 5 == 0:
-            y_hat = torch.sigmoid(logits)
-            validate_epoch(dino_lora, val_loader, criterion, metrics)
+            y_hat = torch.sigmoid(pixel_logits)  # tras mask2former_to_pixel_logits
+
+            validate_epoch(
+                dino_lora, val_loader, criterion, metrics, config.use_mask2former
+            )
 
             logging.info(
                 f"Epoch: {epoch} - val IoU: {metrics['val_iou'][-1]:.4f} "
@@ -303,24 +340,36 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
                 )
                 _log_val_dict(
                     "val/nn_per_class_macro",
-                    {k: v["IoU"] for k, v in metrics["val_nn_per_class_macro"][-1].items()},
+                    {
+                        k: v["IoU"]
+                        for k, v in metrics["val_nn_per_class_macro"][-1].items()
+                    },
                     global_step,
                 )
                 _log_val_dict(
                     "val/nn_per_class_macro_dice",
-                    {k: v["Dice"] for k, v in metrics["val_nn_per_class_macro"][-1].items()},
+                    {
+                        k: v["Dice"]
+                        for k, v in metrics["val_nn_per_class_macro"][-1].items()
+                    },
                     global_step,
                 )
                 _log_val_dict(
                     "val/nn_per_class_micro",
-                    {k: v["IoU"] for k, v in metrics["val_nn_per_class_micro"][-1].items()},
+                    {
+                        k: v["IoU"]
+                        for k, v in metrics["val_nn_per_class_micro"][-1].items()
+                    },
                     global_step,
                 )
                 _log_val_dict(
                     "val/nn_per_class_micro_dice",
-                    {k: v["Dice"] for k, v in metrics["val_nn_per_class_micro"][-1].items()},
+                    {
+                        k: v["Dice"]
+                        for k, v in metrics["val_nn_per_class_micro"][-1].items()
+                    },
                     global_step,
-                )   
+                )
 
         if epoch % 25 == 0:
             if config.debug:

@@ -7,7 +7,10 @@ import torch.nn.functional as F
 from .lora import LoRA
 from .linear_decoder import LinearClassifier
 from .fpn_decoder import FPNDecoder
-from .mask2former_decoder import Mask2FormerHead
+
+# model/segmentation/models/__init__.py
+from .segmentation.models.heads.mask2former_head import Mask2FormerHead
+from .segmentation.models.backbone.dinov3_adapter import DINOv3_Adapter
 
 
 class DINOEncoderLoRA(nn.Module):
@@ -21,6 +24,11 @@ class DINOEncoderLoRA(nn.Module):
         use_fpn: bool = False,
         use_mask2former: bool = False,
         img_dim: tuple[int, int] = (520, 520),
+        m2f_hidden_dim: int = 256,
+        m2f_queries: int = 100,
+        m2f_dec_layers: int = 6,
+        m2f_heads: int = 8,
+        m2f_dim_ffn: int = 2048,
     ):
         """The DINOv2 encoder-decoder model for finetuning to downstream tasks.
 
@@ -67,16 +75,24 @@ class DINOEncoderLoRA(nn.Module):
 
         elif self.use_mask2former:
             print("Using Mask2Former decoder")
-            # A lean Mask2Former + ViT-Adapter head
-            self.decoder = Mask2FormerHead(
-                in_channels=emb_dim,  # DINOv2 token dim (e.g., 1024 or 1536/1920/3840)
-                n_classes=n_classes,
-                n_queries=100,
-                d_model=256,
-                nheads=8,
-                n_layers=6,
-                ff_dim=1024,  # to support processing the 4096-dimensional output of the DINOv3 backbone, cited. but for dinov3_vitl16 is 1024
+            # tu adapter convierte ViT -> pirámide [P3, P4, P5] con C = m2f_hidden_dim
+            self.backbone = DINOv3_Adapter(
+                encoder=self.encoder,
+                emb_dim=emb_dim,  # ojo: ViT-L sigue siendo 1024, no 1048
+                out_channels=m2f_hidden_dim,
             )
+            self.decoder = Mask2FormerHead(
+                in_channels=m2f_hidden_dim,
+                num_classes=n_classes,  # sin background; el head añade +1
+                hidden_dim=m2f_hidden_dim,
+                num_queries=m2f_queries,
+                nheads=m2f_heads,
+                dim_feedforward=m2f_dim_ffn,
+                dec_layers=m2f_dec_layers,
+                mask_dim=m2f_hidden_dim,
+                enforce_input_project=True,
+            )
+
         else:
             print("Using linear decoder")
             self.decoder = LinearClassifier(
@@ -135,25 +151,9 @@ class DINOEncoderLoRA(nn.Module):
             logits = self.decoder(feature)
 
         elif self.use_mask2former:
-            with torch.no_grad():  # encoder congelado ⇒ ahorra memoria
-                inter_feats = self.encoder.get_intermediate_layers(
-                    x, n=self.inter_layers, reshape=True
-                )
-
-            out = self.decoder(inter_feats, img_size_hw=x.shape[-2:])
-
-            class_logits = out["class_logits"][..., :-1]  # [B,Nq,C]
-            mask_logits_14 = out["mask_logits_1_4"]  # [B,Nq,H/4,W/4]  <-- usa 1/4
-
-            combined = class_logits.unsqueeze(-1).unsqueeze(
-                -1
-            ) + mask_logits_14.unsqueeze(2)  # [B,Nq,C,H/4,W/4]
-            sem_logits_14 = torch.logsumexp(combined, dim=1)  # [B,C,H/4,W/4]
-
-            sem_logits = F.interpolate(
-                sem_logits_14, size=x.shape[-2:], mode="bilinear", align_corners=False
-            )
-            return sem_logits
+            feats = self.backbone(x)  # [P3,P4,P5], cada uno (B, C=hidden_dim, H, W)
+            out = self.decoder(feats)  # dict: pred_logits, pred_masks, aux_outputs
+            return out
 
         else:
             feature = self.encoder.forward_features(x)
