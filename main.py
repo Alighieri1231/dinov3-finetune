@@ -98,6 +98,9 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
         use_fpn=config.use_fpn,
         use_mask2former=config.use_mask2former,
     ).cuda()
+    # dino_lora = dino_lora.to(memory_format=torch.channels_last)
+    # torch.backends.cuda.matmul.allow_tf32 = True
+    # torch.set_float32_matmul_precision("high")
 
     if config.lora_weights:
         dino_lora.load_parameters(config.lora_weights)

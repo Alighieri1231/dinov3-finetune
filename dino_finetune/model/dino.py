@@ -135,21 +135,24 @@ class DINOEncoderLoRA(nn.Module):
             logits = self.decoder(feature)
 
         elif self.use_mask2former:
-            inter_feats = self.encoder.get_intermediate_layers(
-                x, n=self.inter_layers, reshape=True
-            )
+            with torch.no_grad():  # encoder congelado ⇒ ahorra memoria
+                inter_feats = self.encoder.get_intermediate_layers(
+                    x, n=self.inter_layers, reshape=True
+                )
+
             out = self.decoder(inter_feats, img_size_hw=x.shape[-2:])
 
-            class_logits = out["class_logits"][..., :-1]  # [B, Nq, C] (sin "no-object")
-            mask_logits = out["mask_logits"]  # [B, Nq, H, W] (¡ya son logits!)
+            class_logits = out["class_logits"][..., :-1]  # [B,Nq,C]
+            mask_logits_14 = out["mask_logits_1_4"]  # [B,Nq,H/4,W/4]  <-- usa 1/4
 
-            # Combinar en espacio de logits: logsumexp( mask_logit + class_logit )
-            # Expande dims para broadcast: [B,Nq,1,1] y [B,Nq,1,H,W] respectivamente
-            combined = class_logits.unsqueeze(-1).unsqueeze(-1) + mask_logits.unsqueeze(
-                2
-            )  # [B,Nq,C,H,W]
-            sem_logits = torch.logsumexp(combined, dim=1)  # [B, C, H, W]  <-- LOGITS
+            combined = class_logits.unsqueeze(-1).unsqueeze(
+                -1
+            ) + mask_logits_14.unsqueeze(2)  # [B,Nq,C,H/4,W/4]
+            sem_logits_14 = torch.logsumexp(combined, dim=1)  # [B,C,H/4,W/4]
 
+            sem_logits = F.interpolate(
+                sem_logits_14, size=x.shape[-2:], mode="bilinear", align_corners=False
+            )
             return sem_logits
 
         else:
