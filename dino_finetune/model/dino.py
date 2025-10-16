@@ -97,7 +97,7 @@ class DINOEncoderLoRA(nn.Module):
             self.decoder = Mask2FormerHead(
                 input_shape=input_shape,
                 hidden_dim=m2f_hidden_dim,  # p. ej., 256
-                num_classes=n_classes,
+                num_classes=n_classes - 1,  # sin contar background
                 ignore_value=255,
                 transformer_in_feature="multi_scale_pixel_decoder",
             )
