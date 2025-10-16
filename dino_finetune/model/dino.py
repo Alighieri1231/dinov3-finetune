@@ -76,30 +76,38 @@ class DINOEncoderLoRA(nn.Module):
         elif self.use_mask2former:
             print("Using Mask2Former decoder")
 
-            # 1) backbone que entrega UN DICCIONARIO de features con claves "1","2","3","4"
-            #    cada uno (B, m2f_hidden_dim, H_i, W_i) con strides ~ [4,8,16,32]
             self.backbone = DINOv3_Adapter(
                 encoder=self.encoder,
                 emb_dim=emb_dim,  # ViT-L/16 => 1024
                 out_channels=m2f_hidden_dim,  # canal por nivel de la pirámide
             )
+        elif self.use_mask2former:
+            print("Using Mask2Former decoder")
 
-            # 2) input_shape para el head (channels, H, W, stride). H/W pueden ser None.
+            # 1) Adapter con el backbone correcto + índices de ViT-L
+            self.backbone = DINOv3_Adapter(
+                backbone=self.encoder,  # <-- importante
+                interaction_indexes=[4, 11, 17, 23],  # <-- ViT-L
+                # (opcional) otros flags: with_cp=True, deform_num_heads=m2f_heads, etc.
+            )
+            embed_dim = self.encoder.embed_dim
+            patch = self.encoder.patch_size  # 16 para ViT-L/16
+
+            # 2) input_shape al estilo Meta (stride=4 en todas las entradas)
             input_shape = {
-                "1": (m2f_hidden_dim, None, None, 4),
-                "2": (m2f_hidden_dim, None, None, 8),
-                "3": (m2f_hidden_dim, None, None, 16),
-                "4": (m2f_hidden_dim, None, None, 32),
+                "1": [embed_dim, patch * 4, patch * 4, 4],
+                "2": [embed_dim, patch * 2, patch * 2, 4],
+                "3": [embed_dim, patch, patch, 4],
+                "4": [embed_dim, patch // 2, patch // 2, 4],
             }
 
-            # 3) instancia del head oficial
+            # 3) Head oficial (puedes usar hidden_dim=256 para ahorrar memoria)
             self.decoder = Mask2FormerHead(
                 input_shape=input_shape,
-                hidden_dim=m2f_hidden_dim,
-                num_classes=n_classes,  # num clases semánticas (incluye background)
-                loss_weight=1.0,
-                ignore_value=255,  # tu dataset usa 255 como ignore
-                transformer_in_feature="multi_scale_pixel_decoder",  # default del head
+                hidden_dim=m2f_hidden_dim,  # p. ej., 256
+                num_classes=n_classes,
+                ignore_value=255,
+                transformer_in_feature="multi_scale_pixel_decoder",
             )
 
         else:
