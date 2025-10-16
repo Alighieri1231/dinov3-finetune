@@ -11,7 +11,7 @@ import torch
 from .backbone.dinov3_adapter import DINOv3_Adapter
 from .heads.linear_head import LinearHead
 from .heads.mask2former_head import Mask2FormerHead
-from .utils import ModelWithIntermediateLayers
+from dino_finetune.model.utils import ModelWithIntermediateLayers
 
 
 class BackboneLayersSet(Enum):
