@@ -55,6 +55,7 @@ class DINOEncoderLoRA(nn.Module):
         # Decoder
         # Patch size is given by (490/14)**2 = 35 * 35
         if self.use_fpn:
+            print("Using FPN decoder")
             self.decoder = FPNDecoder(
                 emb_dim,
                 inter_layers=self.inter_layers,
@@ -65,6 +66,7 @@ class DINOEncoderLoRA(nn.Module):
             )
 
         elif self.use_mask2former:
+            print("Using Mask2Former decoder")
             # A lean Mask2Former + ViT-Adapter head
             self.decoder = Mask2FormerHead(
                 in_channels=emb_dim,  # DINOv2 token dim (e.g., 1024 or 1536/1920/3840)
@@ -76,6 +78,7 @@ class DINOEncoderLoRA(nn.Module):
                 ff_dim=1024,  # to support processing the 4096-dimensional output of the DINOv3 backbone, cited. but for dinov3_vitl16 is 1024
             )
         else:
+            print("Using linear decoder")
             self.decoder = LinearClassifier(
                 emb_dim,
                 patch_h=int(img_dim[0] / encoder.patch_size),
