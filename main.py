@@ -157,7 +157,7 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
     torch.backends.cudnn.benchmark = True  # perf
     use_bf16 = torch.cuda.is_bf16_supported()
     dtype = torch.bfloat16 if use_bf16 else torch.float16
-    scaler = torch.cuda.amp.GradScaler(enabled=(dtype is torch.float16))
+    scaler = torch.amp.GradScaler("cuda", enabled=(dtype is torch.float16))
 
     for epoch in range(config.epochs):
         dino_lora.train()
