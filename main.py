@@ -154,10 +154,10 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
     logging.info("Starting training...")
 
     # check bf16
-    torch.backends.cudnn.benchmark = True  # perf
-    use_bf16 = torch.cuda.is_bf16_supported()
-    dtype = torch.bfloat16 if use_bf16 else torch.float16
-    scaler = torch.amp.GradScaler("cuda", enabled=(dtype is torch.float16))
+    # torch.backends.cudnn.benchmark = True  # perf
+    # use_bf16 = torch.cuda.is_bf16_supported()
+    # dtype = torch.bfloat16 if use_bf16 else torch.float16
+    # scaler = torch.amp.GradScaler("cuda", enabled=(dtype is torch.float16))
 
     for epoch in range(config.epochs):
         dino_lora.train()
@@ -180,21 +180,21 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
 
             optimizer.zero_grad()
 
-            with torch.autocast("cuda", dtype=dtype):
-                logits = dino_lora(images)
-                loss = criterion(logits, masks)
-            if dtype is torch.float16:
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                loss.backward()
-                optimizer.step()
+            # with torch.autocast("cuda", dtype=dtype):
+            #     logits = dino_lora(images)
+            #     loss = criterion(logits, masks)
+            # if dtype is torch.float16:
+            #     scaler.scale(loss).backward()
+            #     scaler.step(optimizer)
+            #     scaler.update()
+            # else:
+            #     loss.backward()
+            #     optimizer.step()
 
-            # logits = dino_lora(images)
-            # loss = criterion(logits, masks)
-            # loss.backward()
-            # optimizer.step()
+            logits = dino_lora(images)
+            loss = criterion(logits, masks)
+            loss.backward()
+            optimizer.step()
 
             running = 0.9 * running + 0.1 * loss.item() if running else loss.item()
             lr = optimizer.param_groups[0]["lr"]
