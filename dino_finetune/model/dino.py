@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from .lora import LoRA
 from .linear_decoder import LinearClassifier
 from .fpn_decoder import FPNDecoder
+from .mask2former_decoder import Mask2FormerHead
 
 
 class DINOEncoderLoRA(nn.Module):
@@ -18,6 +19,7 @@ class DINOEncoderLoRA(nn.Module):
         n_classes: int = 1000,
         use_lora: bool = False,
         use_fpn: bool = False,
+        use_mask2former: bool = False,
         img_dim: tuple[int, int] = (520, 520),
     ):
         """The DINOv2 encoder-decoder model for finetuning to downstream tasks.
@@ -59,6 +61,18 @@ class DINOEncoderLoRA(nn.Module):
                 patch_h=int(img_dim[0] / encoder.patch_size),
                 patch_w=int(img_dim[1] / encoder.patch_size),
                 n_classes=n_classes,
+            )
+
+        elif self.use_mask2former:
+            # A lean Mask2Former + ViT-Adapter head
+            self.decoder = Mask2FormerHead(
+                in_channels=emb_dim,  # DINOv2 token dim (e.g., 1024 or 1536/1920/3840)
+                n_classes=n_classes,
+                n_queries=100,
+                d_model=256,
+                nheads=8,
+                n_layers=6,
+                ff_dim=1024,  # to support processing the 4096-dimensional output of the DINOv3 backbone, cited. but for dinov3_vitl16 is 1024
             )
         else:
             self.decoder = LinearClassifier(
@@ -107,7 +121,6 @@ class DINOEncoderLoRA(nn.Module):
             nn.init.zeros_(w_b.weight)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-
         # If the FPN decoder is used, we take the n last layers for
         # our decoder to get a better segmentation result.
         if self.use_fpn:
@@ -116,6 +129,26 @@ class DINOEncoderLoRA(nn.Module):
                 x, n=self.inter_layers, reshape=True
             )
             logits = self.decoder(feature)
+        elif self.use_mask2former:
+            # Use the same intermediate layers you used for FPN; they must be [B,C,H,W]
+            inter_feats = self.encoder.get_intermediate_layers(
+                x, n=self.inter_layers, reshape=True
+            )
+            out = self.decoder(inter_feats, img_size_hw=x.shape[-2:])
+            # If you want per-pixel class map (semantic seg), combine masks & class logits:
+            class_logits = out["class_logits"]  # [B,Nq,C+1]
+            mask_logits = out["mask_logits"]  # [B,Nq,H,W]
+            # Semantic logits: sum masks weighted by class logits (excluding "no-object"):
+            sem_logits = (
+                torch.einsum(
+                    "bqhw, bqc -> bhwc",
+                    mask_logits,
+                    F.softmax(class_logits, dim=-1)[..., :-1],  # drop "no-object"
+                )
+                .permute(0, 3, 1, 2)
+                .contiguous()
+            )  # [B,C,H,W]
+            return sem_logits
 
         else:
             feature = self.encoder.forward_features(x)
@@ -124,12 +157,10 @@ class DINOEncoderLoRA(nn.Module):
             patch_embeddings = feature["x_norm_patchtokens"]
             logits = self.decoder(patch_embeddings)
 
-        logits = F.interpolate(
-            logits,
-            size=x.shape[2:],
-            mode="bilinear",
-            align_corners=False,
-        )
+        if not self.use_mask2former:
+            logits = F.interpolate(
+                logits, size=x.shape[2:], mode="bilinear", align_corners=False
+            )
         return logits
 
     def save_parameters(self, filename: str) -> None:

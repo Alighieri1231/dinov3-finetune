@@ -279,7 +279,7 @@ if __name__ == "__main__":
         "--img_dim",
         type=int,
         nargs=2,
-        default=(490, 490),
+        default=(480, 480),
         help="Image dimensions (height width)",
     )
     parser.add_argument(
