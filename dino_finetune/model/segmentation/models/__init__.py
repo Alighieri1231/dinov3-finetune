@@ -8,10 +8,10 @@ from functools import partial
 
 import torch
 
-from dinov3.eval.segmentation.models.backbone.dinov3_adapter import DINOv3_Adapter
-from dinov3.eval.segmentation.models.heads.linear_head import LinearHead
-from dinov3.eval.segmentation.models.heads.mask2former_head import Mask2FormerHead
-from dinov3.eval.utils import ModelWithIntermediateLayers
+from backbone.dinov3_adapter import DINOv3_Adapter
+from heads.linear_head import LinearHead
+from heads.mask2former_head import Mask2FormerHead
+from utils import ModelWithIntermediateLayers
 
 
 class BackboneLayersSet(Enum):
@@ -69,7 +69,9 @@ class FeatureDecoder(torch.nn.Module):
         with torch.inference_mode():
             with self.autocast_ctx():
                 out = self.segmentation_model[0](inputs)  # backbone forward
-                out = self.segmentation_model[1].predict(out, rescale_to=rescale_to)  # decoder head prediction
+                out = self.segmentation_model[1].predict(
+                    out, rescale_to=rescale_to
+                )  # decoder head prediction
         return out
 
 
@@ -81,8 +83,12 @@ def build_segmentation_decoder(
     num_classes=150,
     autocast_dtype=torch.float32,
 ):
-    backbone_indices_to_use = _get_backbone_out_indices(backbone_model, backbone_out_layers)
-    autocast_ctx = partial(torch.autocast, device_type="cuda", enabled=True, dtype=autocast_dtype)
+    backbone_indices_to_use = _get_backbone_out_indices(
+        backbone_model, backbone_out_layers
+    )
+    autocast_ctx = partial(
+        torch.autocast, device_type="cuda", enabled=True, dtype=autocast_dtype
+    )
     if decoder_type == "m2f":
         backbone_model = DINOv3_Adapter(
             backbone_model,
@@ -114,7 +120,10 @@ def build_segmentation_decoder(
         backbone_model.requires_grad_(False)
         embed_dim = backbone_model.feature_model.embed_dim
         if isinstance(embed_dim, int):
-            if backbone_out_layers in [BackboneLayersSet.FOUR_LAST, BackboneLayersSet.FOUR_EVEN_INTERVALS]:
+            if backbone_out_layers in [
+                BackboneLayersSet.FOUR_LAST,
+                BackboneLayersSet.FOUR_EVEN_INTERVALS,
+            ]:
                 embed_dim = [embed_dim] * 4
             else:
                 embed_dim = [embed_dim]
