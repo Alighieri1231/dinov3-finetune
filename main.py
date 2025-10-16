@@ -377,9 +377,9 @@ if __name__ == "__main__":
     #     model=backbones[config.size],
     # ).cuda()
 
-    if logging.root=="/home/exx/Documents/nnUNetFrame/dataset/nnUNet_raw":
+    if config.root=="/home/exx/Documents/nnUNetFrame/dataset/nnUNet_raw":
         encoder = torch.hub.load(
-                    "data/GitHub/dinov3",
+                    "/data/GitHub/dinov3",
                     "dinov3_vitl16",
                     source="local",
                     weights="/data/GitHub/dinov3/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth",
