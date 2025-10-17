@@ -5,6 +5,7 @@ import wandb
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR, SequentialLR
 import tqdm
@@ -95,11 +96,17 @@ def validate_epoch(
                 .float()
             )
             masks = masks.cuda(non_blocking=True).long()
+
+            # VALIDACIÓN (dentro de validate_epoch)
             outputs = dino_lora(images)
             if use_mask2former:
-                logits = mask2former_to_pixel_logits(outputs)  # (B,C,H,W)
+                logits = mask2former_to_pixel_logits(outputs)  # (B,C,h',w')
+                logits = F.interpolate(
+                    logits, size=masks.shape[-2:], mode="bilinear", align_corners=False
+                )
             else:
                 logits = outputs
+
             loss = criterion(logits, masks)
             y_hat = torch.sigmoid(logits)
 
@@ -281,13 +288,19 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
             ).long()  # máscaras quedan en formato “normal”
 
             optimizer.zero_grad()
-
+            # ENTRENAMIENTO
             outputs = dino_lora(images)
             if config.use_mask2former:
-                pixel_logits = mask2former_to_pixel_logits(outputs)  # (B,C,H,W)
+                pixel_logits = mask2former_to_pixel_logits(outputs)  # (B,C,h',w')
+                pixel_logits = F.interpolate(
+                    pixel_logits,
+                    size=masks.shape[-2:],
+                    mode="bilinear",
+                    align_corners=False,
+                )
                 loss = criterion(pixel_logits, masks)
             else:
-                pixel_logits = outputs  # (B,C,H,W)
+                pixel_logits = outputs
                 loss = criterion(pixel_logits, masks)
 
             loss.backward()
