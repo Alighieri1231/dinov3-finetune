@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR, SequentialLR
+from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR, SequentialLR, LinearLR
 import tqdm
 from dino_finetune import (
     DINOEncoderLoRA,
@@ -227,13 +227,25 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
         criterion = nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX).cuda()
 
     optimizer = optim.AdamW(
-        dino_lora.parameters(), lr=config.lr, weight_decay=config.weight_decay
+        dino_lora.parameters(), lr=config.lr, weight_decay=config.weight_decay, eps=1e-7
     )
 
     # Scheduler start warm-up with steady incline, at config.warmup_epochs, start cosine annealing
-    warmup_sched = LambdaLR(
-        optimizer, lambda epoch: min(1.0, (epoch + 1) / config.warmup_epochs)
-    )
+    # warmup_sched = LambdaLR(
+    #     optimizer, lambda epoch: min(1.0, (epoch + 1) / config.warmup_epochs)
+    # )
+    if config.mask2former:
+        warmup_sched = LinearLR(
+            optimizer,
+            start_factor=config.warmup_lr,  # 0.00847 -> 1.0
+            end_factor=1.0,
+            total_iters=config.warmup_epochs,  # nº de épocas de warmup
+        )
+    else: 
+        warmup_sched = LambdaLR(
+            optimizer, lambda epoch: min(1.0, (epoch + 1) / config.warmup_epochs)
+        )
+
     cos_sched = CosineAnnealingLR(
         optimizer, T_max=config.epochs - config.warmup_epochs, eta_min=config.min_lr
     )
@@ -304,6 +316,10 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
                 loss = criterion(pixel_logits, masks)
 
             loss.backward()
+            if config.use_mask2former:
+                torch.nn.utils.clip_grad_norm_(
+                    dino_lora.parameters(), 1
+                )  # grad clip for Mask2Former
             optimizer.step()
 
             running = 0.9 * running + 0.1 * loss.item() if running else loss.item()
