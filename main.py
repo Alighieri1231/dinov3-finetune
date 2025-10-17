@@ -234,14 +234,14 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
     # warmup_sched = LambdaLR(
     #     optimizer, lambda epoch: min(1.0, (epoch + 1) / config.warmup_epochs)
     # )
-    if config.mask2former:
+    if config.use_mask2former:
         warmup_sched = LinearLR(
             optimizer,
             start_factor=config.warmup_lr,  # 0.00847 -> 1.0
             end_factor=1.0,
             total_iters=config.warmup_epochs,  # nº de épocas de warmup
         )
-    else: 
+    else:
         warmup_sched = LambdaLR(
             optimizer, lambda epoch: min(1.0, (epoch + 1) / config.warmup_epochs)
         )
@@ -527,6 +527,12 @@ if __name__ == "__main__":
         type=float,
         default=3e-5,
         help="lowest learning rate for the scheduler",
+    )
+    parser.add_argument(
+        "--warmup_lr",
+        type=float,
+        default=0.00847,
+        help="Initial learning rate for the warmup phase",
     )
     parser.add_argument(
         "--weight_decay",
