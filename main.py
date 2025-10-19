@@ -241,7 +241,7 @@ def finetune_dino(config: argparse.Namespace, encoder: nn.Module):
             end_factor=1.0,
             total_iters=config.warmup_epochs,  # nº de épocas de warmup
         )
-    else:
+    else: 
         warmup_sched = LambdaLR(
             optimizer, lambda epoch: min(1.0, (epoch + 1) / config.warmup_epochs)
         )
