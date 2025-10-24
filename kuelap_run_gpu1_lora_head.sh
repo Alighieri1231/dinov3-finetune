@@ -3,9 +3,9 @@
 #SBATCH --partition=kuelap
 #SBATCH --time=10-00:00:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=18
+#SBATCH --cpus-per-task=12
 #SBATCH --gpus=1
-#SBATCH --mem=96G
+#SBATCH --mem=64G
 #SBATCH --hint=nomultithread
 #SBATCH --output=logs/%x-%j.out
 
@@ -35,8 +35,8 @@ DINO=dinov3
 BATCH=32
 EPOCHS=100
 WARMUP=10
-N_WORKERS=18
-FOLDS=(1 3)
+N_WORKERS=12
+FOLDS=(0 1 2 3 4)
 LORA_RANKS=(8 4)
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
