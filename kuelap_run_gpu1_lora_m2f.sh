@@ -55,7 +55,7 @@ for FOLD in "${FOLDS[@]}"; do
   # 4) Mask2forme + LoRA r=4,8
   for r in "${LORA_RANKS[@]}"; do
   # 1) Mask2former 
-  EXP="dino_${DATASET}_fold${FOLD}_bs${BATCH}_mask2former"
+  EXP="dino_${DATASET}_fold${FOLD}_bs${BATCH}_mask2former_LoRA_r${r}_1e-4_${STAMP}"
   run_job "${EXP}" --dataset "${DATASET}" --root "${ROOT}" --split_json "${SPLIT}" \
     --size "${SIZE}" --dino_type "${DINO}" --batch_size "${BATCH}" \
     --epochs "${EPOCHS}" --warmup_epochs "${WARMUP}" --fold "${FOLD}" --debug --wandb --use_mask2former \
