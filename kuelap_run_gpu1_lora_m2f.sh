@@ -24,10 +24,6 @@ set -u
 export LD_LIBRARY_PATH="/scratch/bcastane_lab/lab-conda/envs/castane_lab/lib:${LD_LIBRARY_PATH}"
 export CUDA_HOME="/scratch/bcastane_lab/lab-conda/envs/castane_lab"
 
-cd /scratch/bcastane_lab/eochoaal/dinov3-finetune/dinov3/eval/segmentation/models/utils/ops/
-python setup.py build install
-
-cd /scratch/bcastane_lab/eochoaal/dinov3-finetune/
 
 # === Config base ===
 PY=python
