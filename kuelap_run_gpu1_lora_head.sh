@@ -60,6 +60,7 @@ for FOLD in "${FOLDS[@]}"; do
       --use_lora --r "${r}" --n_workers "${N_WORKERS}" --debug  --wandb \
       --lr 1e-4 --weight_decay 0.1 
   done
+done
 
 
 echo "=== GPU1 listo. Logs en output/logs y logs/%x-%j.out ==="
